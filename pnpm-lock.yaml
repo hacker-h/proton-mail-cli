@@ -11,6 +11,9 @@ importers:
       openpgp:
         specifier: ^6.3.0
         version: 6.3.0
+      playwright-core:
+        specifier: ^1.58.2
+        version: 1.59.1
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -28,6 +31,11 @@ packages:
     resolution: {integrity: sha512-pLzCU8IgyKXPSO11eeharQkQ4GzOKNWhXq79pQarIRZEMt1/ssyr+MIuWBv1mNoenJLg04gvPx+fi4gcKZ4bag==}
     engines: {node: '>= 18.0.0'}
 
+  playwright-core@1.59.1:
+    resolution: {integrity: sha512-HBV/RJg81z5BiiZ9yPzIiClYV/QMsDCKUyogwH9p3MCP6IYjUFu/MActgYAvK0oWyV9NlwM3GLBjADyWgydVyg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -43,6 +51,8 @@ snapshots:
       undici-types: 6.21.0
 
   openpgp@6.3.0: {}
+
+  playwright-core@1.59.1: {}
 
   typescript@5.9.3: {}
 

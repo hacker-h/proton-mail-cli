@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "openpgp": "^6.3.0"
+    "openpgp": "^6.3.0",
+    "playwright-core": "^1.58.2"
   },
   "devDependencies": {
     "typescript": "^5.8.0",
