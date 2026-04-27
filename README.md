@@ -1,34 +1,82 @@
 # protonmail-api-client
 
-Minimal TypeScript/JS client for the Proton Mail REST API. Cookie-session based auth (no SRP login flow built-in — bring your own session cookies via a session store).
+Reusable Proton Mail client package with two layers:
 
-## Usage
+1. `ProtonMailClient` for REST/API access when you already have a valid cookie session store
+2. `ProtonMailBrowserClient` for Playwright-based login, saved-session reuse, plaintext inbox/message extraction, and OTP retrieval
+
+The browser client is the canonical dependency surface when other local projects need to log into Proton Mail and read email content programmatically.
+
+## Browser Client Usage
+
+```js
+import { ProtonMailBrowserClient } from "protonmail-api-client";
+
+const client = new ProtonMailBrowserClient({
+  headless: true,
+  envFile: "/absolute/path/to/env.env",
+  sessionFile: "/absolute/path/to/protonmail-auth.json",
+});
+
+const login = await client.loginAndSaveSession({
+  headless: true,
+  manualFallback: false,
+});
+
+if (!login.success) {
+  throw new Error(login.error);
+}
+
+const latest = await client.getLatestMessage({
+  matchText: /openai|noreply@openai\.com/i,
+  limit: 10,
+});
+
+if (!latest.success) {
+  throw new Error(latest.error);
+}
+
+console.log(latest.message.subject);
+console.log(latest.message.bodyText);
+
+const otp = await client.extractOtpCode();
+if (otp.success) {
+  console.log(otp.code);
+}
+```
+
+### Browser Client Methods
+
+- `loginAndSaveSession(options)`
+- `getInboxMessages(options)`
+- `getLatestMessage(options)`
+- `extractOtpCode(options)`
+
+### Browser Client Runtime Notes
+
+- Fresh automated logins can trigger Proton CAPTCHA or other human-verification challenges.
+- The durable operational model is:
+  1. automatic login when Proton allows it
+  2. saved-session reuse for normal programmatic runs
+- `envFile` should be an absolute path to a trusted credentials file when used.
+- Session files contain secret-bearing browser state and should stay untracked.
+
+## REST/API Usage
 
 ```js
 import { ProtonMailClient, Labels } from "protonmail-api-client";
 
 const client = new ProtonMailClient({
-  sessionStore: mySessionStore,  // must implement getCookieHeader(url) & getUIDCandidates()
-  baseUrl: "https://mail.proton.me/api",  // optional, this is the default
+  sessionStore: mySessionStore,
+  baseUrl: "https://mail.proton.me/api",
 });
 
-// List inbox messages
 const { messages, total } = await client.getMessageMetadata({ LabelID: Labels.INBOX });
-
-// Read a single message (body is PGP-encrypted)
 const message = await client.getMessage("MESSAGE_ID");
-
-// Mark as read
 await client.markMessagesRead(["MESSAGE_ID"]);
-
-// Download attachment (raw encrypted bytes)
 const attachmentBytes = await client.getAttachment("ATTACHMENT_ID");
-
-// Labels/folders
 const labels = await client.getLabels();
 const newLabel = await client.createLabel("Important", "#ff0000");
-
-// Raw API passthrough for any endpoint
 const calendars = await client.api("GET", "/calendar/v1");
 ```
 
@@ -38,27 +86,25 @@ Your session store must implement at minimum:
 
 ```js
 {
-  getCookieHeader(url: string): Promise<string>  // returns "Cookie: ..." header value
-  getUIDCandidates(): Promise<string[]>           // returns possible x-pm-uid values
+  getCookieHeader(url: string): Promise<string>
+  getUIDCandidates(): Promise<string[]>
 
-  // Optional:
-  getUID(): string | Promise<string>                    // direct UID if known
-  applySetCookieHeaders(url, headers): Promise<any[]>   // persist Set-Cookie from responses
-  getRefreshPayload(uid): Promise<object | null>        // for auto auth refresh
-  invalidate(): Promise<void>                           // clear caches after refresh
+  getUID(): string | Promise<string>
+  applySetCookieHeaders(url, headers): Promise<any[]>
+  getRefreshPayload(uid): Promise<object | null>
+  invalidate(): Promise<void>
 }
 ```
-
-See `proton-calendar-api` sibling project for a working `CookieSessionStore` implementation.
 
 ## Implemented
 
 | Area | Methods |
 |------|---------|
+| Browser automation | `ProtonMailBrowserClient.loginAndSaveSession`, `getInboxMessages`, `getLatestMessage`, `extractOtpCode` |
 | Auth/User | `getUser`, `getAddresses`, `getKeySalts` |
 | Messages (read) | `getMessage`, `getMessageMetadata`, `getAllMessageMetadata`, `getMessageIds`, `getAllMessageIds`, `getMessageCount` |
 | Messages (actions) | `deleteMessages`, `markMessagesRead`, `markMessagesUnread`, `labelMessages`, `unlabelMessages`, `markMessagesForwarded`, `markMessagesUnforwarded` |
-| Attachments | `getAttachment` (raw encrypted bytes) |
+| Attachments | `getAttachment` |
 | Labels/Folders | `getLabels`, `createLabel`, `updateLabel`, `deleteLabel` |
 | Conversations | `getConversation`, `getConversations` |
 | Events | `getLatestEventId`, `getEvents` |
@@ -66,36 +112,34 @@ See `proton-calendar-api` sibling project for a working `CookieSessionStore` imp
 
 ## Not Yet Implemented
 
-- **SRP authentication** (`POST /auth/v4/info` + `/auth/v4` login flow) — requires `@proton/srp` or equivalent big-integer SRP-6a implementation
-- **Draft creation** (`POST /mail/v4/messages`) — requires PGP encryption of body with address keyring
-- **Draft update** (`PUT /mail/v4/messages/:id`) — same PGP requirement
-- **Send message** (`POST /mail/v4/messages/:id`) — requires building `MessagePackage` with per-recipient encryption, session key splitting, etc.
-- **Attachment upload** (`POST /mail/v4/attachments`) — requires PGP encryption + multipart upload with KeyPackets/DataPacket/Signature
-- **Attachment decryption** — fetching raw bytes is implemented; decrypting with user/address keys is not
-- **Message body decryption** — same: raw PGP armored body returned; decrypt-with-keyring not included
-- **Key management** — unlocking user key → address keys → deriving key passwords from persisted session blobs
-- **Contacts** (`/contacts/v4/contacts`, `/contacts/v4/contacts/emails`)
-- **2FA/TOTP** during auth
-- **FIDO2/WebAuthn** during auth
-- **Import messages** (batch `POST /mail/v4/messages/import`)
-- **Undo actions** (`POST /mail/v4/undoactions`)
-- **Search** (`GET /mail/v4/messages` with search params)
-- **Filters/Rules** (`/mail/v4/filters`)
-- **Settings** (`/mail/v4/settings`, `/core/v4/settings`)
-- **Human verification** challenge handling
+- SRP authentication
+- Draft creation / update / send via encrypted REST payloads
+- Attachment decryption
+- REST message body decryption
+- Key management
+- Contacts
+- 2FA/TOTP during auth
+- FIDO2/WebAuthn during auth
+- Import messages
+- Undo actions
+- Search
+- Filters/Rules
+- Settings
+- Guaranteed fresh-login success when Proton presents CAPTCHA/human verification
 
 ## Architecture
 
 ```
 src/
-  index.js       — public exports
-  client.js      — ProtonMailClient (high-level methods)
-  http.js        — ProtonHttp (transport, retry, auth refresh)
-  errors.js      — ApiError
-  constants.js   — labels, flags, config defaults
+  index.js
+  browser-client.js
+  client.js
+  http.js
+  errors.js
+  constants.js
 ```
 
 ## Related
 
-- [ProtonMail/go-proton-api](https://github.com/ProtonMail/go-proton-api) — official Go reference client
-- [proton-calendar-api](../proton-calendar-api) — sibling project for Proton Calendar with cookie-session auth
+- [ProtonMail/go-proton-api](https://github.com/ProtonMail/go-proton-api)
+- [proton-calendar-api](../proton-calendar-api)
