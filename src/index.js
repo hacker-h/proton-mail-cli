@@ -1,4 +1,5 @@
 export { ProtonMailClient } from "./client.js";
+export { ProtonMailBrowserClient, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "./browser-client.js";
 export { ProtonHttp } from "./http.js";
 export { ApiError } from "./errors.js";
 export {

@@ -1,0 +1,830 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright-core";
+
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DATA_DIR = path.join(ROOT_DIR, "data");
+const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
+const INBOX_URL = "https://mail.proton.me/u/0/inbox";
+const MAIL_HOME_URL = "https://mail.proton.me";
+const OTP_RE = /\b(\d{6})\b/;
+const CAPTCHA_TERMS = ["captcha", "challenge", "human verification", "hcaptcha"];
+const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
+const POLL_INTERVAL_MS = 5000;
+const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
+
+export class ProtonMailBrowserClient {
+  #options;
+  #envLoaded = false;
+
+  constructor(options = {}) {
+    this.#options = {
+      headless: Boolean(options.headless),
+      timeoutSeconds: parsePositiveInt(options.timeoutSeconds, 90),
+      manualLoginTimeoutSeconds: parsePositiveInt(options.manualLoginTimeoutSeconds, 300),
+      sessionFile: normalizePath(options.sessionFile) || DEFAULT_SESSION_FILE,
+      envFile: normalizeAbsolutePath(options.envFile || process.env.PROTONMAIL_ENV_FILE || ""),
+      usernameEnv: options.usernameEnv || "PROTONMAIL_USERNAME",
+      passwordEnv: options.passwordEnv || "PROTONMAIL_PASSWORD",
+      userAgent: options.userAgent || DEFAULT_USER_AGENT,
+      viewport: options.viewport || DEFAULT_VIEWPORT,
+      browserFactory: options.browserFactory || chromium,
+    };
+  }
+
+  get sessionFile() {
+    return this.#options.sessionFile;
+  }
+
+  loadRuntimeEnv() {
+    if (this.#envLoaded) {
+      return { loaded: false, file: "" };
+    }
+
+    const candidates = [
+      this.#options.envFile,
+      path.join(ROOT_DIR, "env.env"),
+      path.join(ROOT_DIR, ".env"),
+    ].filter(Boolean);
+
+    for (const filePath of candidates) {
+      const loaded = loadEnvFile(filePath);
+      if (loaded) {
+        this.#envLoaded = true;
+        return { loaded: true, file: filePath };
+      }
+    }
+
+    this.#envLoaded = true;
+    return { loaded: false, file: "" };
+  }
+
+  async loginAndSaveSession(options = {}) {
+    this.loadRuntimeEnv();
+    const settings = {
+      headless: options.headless ?? this.#options.headless,
+      manualFallback: options.manualFallback !== false,
+      timeoutSeconds: parsePositiveInt(options.timeoutSeconds, this.#options.manualLoginTimeoutSeconds),
+    };
+    const storage = loadStorageState(this.#options.sessionFile);
+    const credentials = this.#loadCredentials();
+
+    let browser;
+    let context;
+    let page;
+
+    try {
+      ({ browser, context, page } = await this.#launch({
+        headless: settings.headless,
+        storageState: storage.storageState,
+      }));
+
+      const navigation = await navigateToInbox(page);
+      if (navigation.state === "inbox") {
+        await dismissModals(page);
+        await saveSession(context, this.#options.sessionFile);
+        clearCooldown(this.#options.sessionFile);
+        return {
+          success: true,
+          loginMethod: "session",
+          sessionValid: true,
+          sessionFileExists: storage.exists,
+        };
+      }
+
+      if (!credentials.ready) {
+        return resultWithError("Missing Proton Mail credentials", {
+          envFileLoaded: this.#options.envFile || null,
+        });
+      }
+
+      const automatic = await performLogin({
+        page,
+        context,
+        username: credentials.username,
+        password: credentials.password,
+        sessionFile: this.#options.sessionFile,
+      });
+      if (automatic.success) {
+        return {
+          success: true,
+          loginMethod: automatic.loginMethod || "automatic",
+          sessionValid: true,
+          sessionFileExists: storage.exists,
+        };
+      }
+
+      if (!settings.manualFallback || settings.headless || automatic.manualRequired === false) {
+        return automatic;
+      }
+
+      return waitForManualLoginCompletion({
+        page,
+        context,
+        sessionFile: this.#options.sessionFile,
+        timeoutSeconds: settings.timeoutSeconds,
+      });
+    } catch (error) {
+      return resultWithError(error?.message || "Unexpected Proton Mail login failure");
+    } finally {
+      await context?.close().catch(() => {});
+      await browser?.close().catch(() => {});
+    }
+  }
+
+  async getInboxMessages(options = {}) {
+    this.loadRuntimeEnv();
+    const session = await this.#ensureLoggedIn(options);
+    if (!session.success) {
+      return session;
+    }
+
+    const { browser, context, page } = session;
+    try {
+      await dismissModals(page);
+      const scan = await scanInbox(page, options.limit || 50);
+      return {
+        success: true,
+        sessionValid: true,
+        inboxMessageCount: scan.inboxMessageCount,
+        messages: scan.messages,
+      };
+    } finally {
+      await context.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
+  }
+
+  async getLatestMessage(options = {}) {
+    this.loadRuntimeEnv();
+    const session = await this.#ensureLoggedIn(options);
+    if (!session.success) {
+      return session;
+    }
+
+    const { browser, context, page } = session;
+    try {
+      await dismissModals(page);
+      const scan = await scanInbox(page, options.limit || 50);
+      const target = findMatchingMessage(scan.messages, options.matchText);
+      if (!target) {
+        return resultWithError("No matching Proton Mail message found", {
+          inboxMessageCount: scan.inboxMessageCount,
+        });
+      }
+
+      await openMessage(page, target.index);
+      const extracted = await extractOpenedMessage(page, target.preview);
+      if (!extracted.success) {
+        return extracted;
+      }
+
+      return {
+        success: true,
+        sessionValid: true,
+        message: {
+          index: target.index,
+          preview: target.preview,
+          subject: extracted.subject,
+          bodyText: extracted.bodyText,
+        },
+      };
+    } finally {
+      await context.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
+  }
+
+  async extractOtpCode(options = {}) {
+    const matchText = options.matchText || /openai|noreply@openai\.com/i;
+    const result = await this.getLatestMessage({ ...options, matchText });
+    if (!result.success) {
+      return result;
+    }
+
+    const code = extractFirstOtpCode(result.message.bodyText);
+    if (!code) {
+      return resultWithError("Matching email found, but no 6-digit code was present", {
+        message: result.message,
+      });
+    }
+
+    return {
+      success: true,
+      sessionValid: true,
+      code,
+      message: result.message,
+    };
+  }
+
+  async #ensureLoggedIn(options = {}) {
+    const headless = options.headless ?? this.#options.headless;
+    const storage = loadStorageState(this.#options.sessionFile);
+    let browser;
+    let context;
+    let page;
+
+    try {
+      ({ browser, context, page } = await this.#launch({
+        headless,
+        storageState: storage.storageState,
+      }));
+
+      let navigation = await navigateToInbox(page);
+      if (navigation.state === "inbox") {
+        return { success: true, browser, context, page };
+      }
+
+      const cooldown = getCooldownState(this.#options.sessionFile);
+      if (cooldown.active) {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return resultWithError("Login cooldown active; restore the session before retrying", { cooldown: true });
+      }
+
+      const credentials = this.#loadCredentials();
+      if (!credentials.ready) {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return resultWithError("Missing Proton Mail credentials");
+      }
+
+      const automatic = await performLogin({
+        page,
+        context,
+        username: credentials.username,
+        password: credentials.password,
+        sessionFile: this.#options.sessionFile,
+      });
+      if (!automatic.success) {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return automatic;
+      }
+
+      navigation = await waitForInboxOrLogin(page, 10000);
+      if (navigation.state !== "inbox") {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return resultWithError("Automatic login completed but inbox was not reachable");
+      }
+
+      return { success: true, browser, context, page };
+    } catch (error) {
+      await context?.close().catch(() => {});
+      await browser?.close().catch(() => {});
+      return resultWithError(error?.message || "Unexpected Proton Mail browser failure");
+    }
+  }
+
+  #loadCredentials() {
+    const username = env(this.#options.usernameEnv);
+    const password = env(this.#options.passwordEnv);
+    return { username, password, ready: Boolean(username && password) };
+  }
+
+  async #launch({ headless, storageState }) {
+    const browser = await this.#options.browserFactory.launch({
+      headless: Boolean(headless),
+      args: ["--disable-blink-features=AutomationControlled"],
+    });
+    const context = await browser.newContext({
+      userAgent: this.#options.userAgent,
+      viewport: this.#options.viewport,
+      storageState: storageState || undefined,
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", {
+        configurable: true,
+        get: () => undefined,
+      });
+    });
+    const page = await context.newPage();
+    return { browser, context, page };
+  }
+}
+
+export function extractFirstOtpCode(text) {
+  return String(text || "").match(OTP_RE)?.[1] || "";
+}
+
+export function matchOpenAiEmail(preview) {
+  return /openai|noreply@openai\.com/i.test(String(preview || ""));
+}
+
+export function defaultSessionFile() {
+  return DEFAULT_SESSION_FILE;
+}
+
+function env(name, fallback = "") {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizePath(filePath) {
+  return filePath ? path.resolve(String(filePath)) : "";
+}
+
+function normalizeAbsolutePath(filePath) {
+  if (!filePath) {
+    return "";
+  }
+  const candidate = String(filePath).trim();
+  return path.isAbsolute(candidate) ? path.resolve(candidate) : "";
+}
+
+function ensureDir(dirPath) {
+  if (!dirPath) {
+    return;
+  }
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function ensurePrivateDir(dirPath) {
+  ensureDir(dirPath);
+  try {
+    fs.chmodSync(dirPath, 0o700);
+  } catch {}
+}
+
+function loadEnvFile(filePath) {
+  const trustedPath = normalizeAbsolutePath(filePath);
+  if (!trustedPath || !fs.existsSync(trustedPath)) {
+    return false;
+  }
+  const lines = fs.readFileSync(trustedPath, "utf8").split(/\r?\n/u);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) {
+      continue;
+    }
+    const index = line.indexOf("=");
+    const key = line.slice(0, index).trim();
+    if (!key || process.env[key]) {
+      continue;
+    }
+    let value = line.slice(index + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+  return true;
+}
+
+function loadStorageState(sessionFile) {
+  if (!fs.existsSync(sessionFile)) {
+    return { exists: false, storageState: null, error: null };
+  }
+  try {
+    return {
+      exists: true,
+      storageState: JSON.parse(fs.readFileSync(sessionFile, "utf8")),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      storageState: null,
+      error: error?.message || "Session file unreadable",
+    };
+  }
+}
+
+function cooldownFile(sessionFile) {
+  return path.join(path.dirname(sessionFile), "protonmail-login-cooldown.json");
+}
+
+function getCooldownState(sessionFile) {
+  const filePath = cooldownFile(sessionFile);
+  if (!fs.existsSync(filePath)) {
+    return { active: false };
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const lastFailedAt = data?.lastFailedAt ? Date.parse(data.lastFailedAt) : Number.NaN;
+    if (!Number.isFinite(lastFailedAt)) {
+      return { active: false };
+    }
+    return { active: Date.now() - lastFailedAt < LOGIN_COOLDOWN_MS };
+  } catch {
+    return { active: false };
+  }
+}
+
+function writeCooldown(sessionFile, reason) {
+  const filePath = cooldownFile(sessionFile);
+  ensurePrivateDir(path.dirname(filePath));
+  fs.writeFileSync(filePath, `${JSON.stringify({ lastFailedAt: new Date().toISOString(), reason }, null, 2)}\n`, "utf8");
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {}
+}
+
+function clearCooldown(sessionFile) {
+  const filePath = cooldownFile(sessionFile);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
+function resultWithError(error, extra = {}) {
+  return { success: false, error, ...extra };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeText(value) {
+  return String(value || "").replace(/\s+/gu, " ").trim();
+}
+
+function truncate(value, max = 200) {
+  const text = normalizeText(value);
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function hasCaptcha(content) {
+  const lowered = String(content || "").toLowerCase();
+  return CAPTCHA_TERMS.some((term) => lowered.includes(term));
+}
+
+async function saveSession(context, sessionFile) {
+  ensurePrivateDir(path.dirname(sessionFile));
+  await context.storageState({ path: sessionFile });
+  try {
+    fs.chmodSync(sessionFile, 0o600);
+  } catch {}
+}
+
+async function navigateToInbox(page) {
+  await page.goto(INBOX_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  return waitForInboxOrLogin(page, 15000);
+}
+
+async function hasInboxIndicators(page) {
+  for (const selector of [MESSAGE_ROW_SELECTOR, '[data-testid*="compose"]', '[data-testid*="navigation-link:inbox"]']) {
+    try {
+      if (await page.locator(selector).first().isVisible({ timeout: 1000 })) {
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+async function getPageContent(page) {
+  try {
+    return await page.content();
+  } catch {
+    return "";
+  }
+}
+
+async function locateLoginEmailField(page, timeout = 15000) {
+  const candidates = [
+    page.getByRole("textbox", { name: /email|e-mail|benutzername/i }).first(),
+    page.locator('input[id="email"], input[name="email"], input[type="email"], input[autocomplete="username"]').first(),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await candidate.waitFor({ state: "visible", timeout });
+      return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+async function locateLoginPasswordField(page, timeout = 10000) {
+  const candidates = [
+    page.getByRole("textbox", { name: /password|passwort/i }).first(),
+    page.locator('input[id="password"], input[name="password"], input[type="password"], input[autocomplete="current-password"]').first(),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await candidate.waitFor({ state: "visible", timeout });
+      return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+async function locateSignInButton(page, timeout = 10000) {
+  const candidates = [
+    page.getByRole("button", { name: /sign in|anmelden/i }).first(),
+    page.locator('button[type="submit"], button:has-text("Sign in"), button:has-text("Anmelden")').first(),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await candidate.waitFor({ state: "visible", timeout });
+      return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+async function locateStaySignedInCheckbox(page) {
+  const candidates = [
+    page.getByRole("checkbox", { name: /keep me signed in|angemeldet bleiben/i }).first(),
+    page.locator('input[id="staySignedIn"], label:has-text("Keep me signed in") input[type="checkbox"]').first(),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (await candidate.isVisible({ timeout: 1000 })) {
+        return candidate;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+async function waitForInboxOrLogin(page, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const currentUrl = page.url();
+    if (/\/two-factor|\/totp/i.test(currentUrl)) {
+      return { state: "twoFactor", url: currentUrl };
+    }
+    if (await hasInboxIndicators(page)) {
+      return { state: "inbox", url: currentUrl };
+    }
+    if (currentUrl.includes("account.proton.me")) {
+      const content = await getPageContent(page);
+      if (hasCaptcha(content)) {
+        return { state: "captcha", url: currentUrl };
+      }
+      if (await locateLoginEmailField(page, 500)) {
+        return { state: "login", url: currentUrl };
+      }
+    }
+    await delay(500);
+  }
+  return { state: "unknown", url: page.url() };
+}
+
+async function getAlertTexts(page) {
+  const alerts = page.locator('[role="alert"]');
+  const count = await alerts.count();
+  const texts = [];
+  for (let index = 0; index < count; index += 1) {
+    try {
+      const text = normalizeText(await alerts.nth(index).innerText({ timeout: 1000 }));
+      if (text) {
+        texts.push(text);
+      }
+    } catch {}
+  }
+  return texts;
+}
+
+async function dismissModals(page) {
+  const modalSelector = '[data-testid*="modal"], [role="dialog"], .modal, .modal-two';
+  let dismissed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await page.locator(modalSelector).count())) {
+      return dismissed;
+    }
+
+    const clicked = await page.evaluate((selector) => {
+      const dialogs = Array.from(document.querySelectorAll(selector));
+      for (const dialog of dialogs) {
+        for (const node of Array.from(dialog.querySelectorAll('button, [role="button"], [aria-label]'))) {
+          const text = String(node.textContent || node.getAttribute("aria-label") || "").toLowerCase().trim();
+          if (!text) continue;
+          if (["close", "dismiss", "not now", "later", "cancel", "schließen", "später", "got it", "accept"].some((term) => text.includes(term))) {
+            node.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }, modalSelector).catch(() => false);
+
+    if (!clicked) {
+      await page.keyboard.press("Escape").catch(() => {});
+    }
+    dismissed = true;
+    await delay(400);
+  }
+  return dismissed;
+}
+
+async function completeAppsPageIfNeeded(page) {
+  if (!page.url().includes("account.proton.me/apps")) {
+    return false;
+  }
+  const candidates = [
+    page.locator('[data-testid="explore-mail"]').first(),
+    page.getByRole("button", { name: /mail/i }).first(),
+    page.getByRole("link", { name: /mail/i }).first(),
+  ];
+  for (const target of candidates) {
+    try {
+      if (await target.isVisible({ timeout: 1000 })) {
+        await target.click({ timeout: 5000 });
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+async function performLogin({ page, context, username, password, sessionFile }) {
+  if (!page.url().includes("account.proton.me")) {
+    await page.goto(MAIL_HOME_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  }
+
+  const emailField = await locateLoginEmailField(page, 15000);
+  if (!emailField) {
+    return resultWithError("Proton login form did not appear", { manualRequired: true });
+  }
+  await emailField.fill(username);
+
+  const passwordField = await locateLoginPasswordField(page, 10000);
+  if (!passwordField) {
+    return resultWithError("Proton password field did not appear", { manualRequired: true });
+  }
+  await passwordField.fill(password);
+
+  const staySignedIn = await locateStaySignedInCheckbox(page);
+  if (staySignedIn) {
+    try {
+      const checked = await staySignedIn.isChecked().catch(() => true);
+      if (!checked) {
+        await staySignedIn.check({ force: true });
+      }
+    } catch {}
+  }
+
+  const signInButton = await locateSignInButton(page, 10000);
+  if (!signInButton) {
+    return resultWithError("Proton sign-in button did not appear", { manualRequired: true });
+  }
+  await signInButton.click();
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30000) {
+    const currentUrl = page.url();
+    const pageContent = await getPageContent(page);
+
+    if (hasCaptcha(pageContent)) {
+      writeCooldown(sessionFile, "CAPTCHA detected during Proton Mail login");
+      return resultWithError("CAPTCHA detected during Proton Mail login", { captcha: true, manualRequired: true });
+    }
+
+    if (/\/two-factor|\/totp/i.test(currentUrl)) {
+      writeCooldown(sessionFile, "Two-factor authentication required");
+      return resultWithError("Two-factor authentication required", { twoFactor: true, manualRequired: true });
+    }
+
+    const wrongPassword = (await getAlertTexts(page)).find((text) => /incorrect login credentials|wrong password|invalid password/i.test(text));
+    if (wrongPassword) {
+      writeCooldown(sessionFile, "Incorrect login credentials");
+      return resultWithError("Incorrect login credentials");
+    }
+
+    if (await hasInboxIndicators(page)) {
+      await dismissModals(page);
+      await saveSession(context, sessionFile);
+      clearCooldown(sessionFile);
+      return { success: true, loginMethod: "automatic" };
+    }
+
+    if (await completeAppsPageIfNeeded(page)) {
+      await delay(1500);
+    }
+
+    await delay(1000);
+  }
+
+  writeCooldown(sessionFile, `Login timed out at ${page.url()}`);
+  return resultWithError("Automatic login timed out", { manualRequired: true });
+}
+
+async function waitForManualLoginCompletion({ page, context, sessionFile, timeoutSeconds }) {
+  const startedAt = Date.now();
+  const timeoutMs = Math.max(5, timeoutSeconds) * 1000;
+  while (Date.now() - startedAt <= timeoutMs) {
+    const state = await waitForInboxOrLogin(page, 1500);
+    if (state.state === "inbox") {
+      await dismissModals(page);
+      await saveSession(context, sessionFile);
+      clearCooldown(sessionFile);
+      return { success: true, loginMethod: "manual", sessionValid: true };
+    }
+    await delay(1000);
+  }
+  return resultWithError("Manual login did not reach inbox before timeout", { manualRequired: true, timedOut: true });
+}
+
+async function scanInbox(page, limit = 50) {
+  let rows = page.locator(MESSAGE_ROW_SELECTOR);
+  let count = await rows.count();
+  let previousCount = -1;
+  let attempts = 0;
+  while (count > 0 && count < limit && attempts < 10 && count !== previousCount) {
+    previousCount = count;
+    await rows.nth(count - 1).scrollIntoViewIfNeeded().catch(() => {});
+    await delay(1000);
+    rows = page.locator(MESSAGE_ROW_SELECTOR);
+    count = await rows.count();
+    attempts += 1;
+  }
+
+  const messages = [];
+  for (let index = 0; index < Math.min(count, limit); index += 1) {
+    try {
+      messages.push({ index, preview: truncate(await rows.nth(index).innerText({ timeout: 1500 }), 240) });
+    } catch {}
+  }
+  return { inboxMessageCount: count, messages };
+}
+
+function findMatchingMessage(messages, matchText) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return null;
+  }
+  if (!matchText) {
+    return messages[0];
+  }
+  for (const message of messages) {
+    const preview = message.preview || "";
+    if (typeof matchText === "string" && preview.includes(matchText)) {
+      return message;
+    }
+    if (matchText instanceof RegExp && matchText.test(preview)) {
+      return message;
+    }
+    if (typeof matchText === "function" && matchText(message)) {
+      return message;
+    }
+  }
+  return null;
+}
+
+async function openMessage(page, index) {
+  const locator = page.locator(MESSAGE_ROW_SELECTOR).nth(index);
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  try {
+    await locator.click({ timeout: 5000 });
+  } catch {
+    await locator.evaluate((node) => node.click()).catch(() => {});
+  }
+  await page.waitForSelector('[data-testid="content-iframe"]', { timeout: 10000 });
+}
+
+async function getOpenedMessageSubject(page, fallback) {
+  for (const candidate of [page.locator('[role="region"] h1').first(), page.locator("h1").first()]) {
+    try {
+      const text = normalizeText(await candidate.innerText({ timeout: 1000 }));
+      if (text) {
+        return text;
+      }
+    } catch {}
+  }
+  return truncate(fallback, 120);
+}
+
+async function expandOriginalMessageIfNeeded(frame) {
+  const trigger = frame.locator('[data-testid="message-view:expand-codeblock"]').first();
+  try {
+    if (await trigger.isVisible({ timeout: 1000 })) {
+      await trigger.click({ timeout: 3000 });
+      await delay(1500);
+    }
+  } catch {}
+}
+
+async function extractOpenedMessage(page, fallbackPreview) {
+  const iframeHandle = await page.$('[data-testid="content-iframe"]');
+  if (!iframeHandle) {
+    return resultWithError("Message content iframe was not found");
+  }
+  const frame = await iframeHandle.contentFrame();
+  if (!frame) {
+    return resultWithError("Message iframe content was unavailable");
+  }
+  await expandOriginalMessageIfNeeded(frame);
+  const bodyText = await frame.innerText("body");
+  return {
+    success: true,
+    subject: await getOpenedMessageSubject(page, fallbackPreview),
+    bodyText,
+  };
+}
+
+export const __internal = {
+  defaultSessionFile: DEFAULT_SESSION_FILE,
+  extractFirstOtpCode,
+  findMatchingMessage,
+  matchOpenAiEmail,
+};
