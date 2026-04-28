@@ -9,9 +9,9 @@ const DEFAULT_DEBUG_PROFILE_DIR = path.join(ROOT_DIR, "data", "debug-profile");
  *
  * Precedence: explicit constructor option > env var > safe default (disabled)
  *
- * @param {object} options - Raw constructor options (may have options.debug)
- * @param {object} env - Environment variables object (e.g. process.env or a mock)
- * @returns {{ enabled: false } | DebugConfig}
+ * @param {*} options - Raw constructor options (may have options.debug)
+ * @param {*} env - Environment variables object (e.g. process.env or a mock)
+ * @returns {object}
  */
 export function resolveDebugConfig(options, env) {
   const debugOption = options.debug;
