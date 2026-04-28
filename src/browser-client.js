@@ -225,6 +225,22 @@ export class ProtonMailBrowserClient {
     };
   }
 
+  async debugLogin(options = {}) {
+    const client = new ProtonMailBrowserClient({
+      sessionFile: this.#options.sessionFile,
+      envFile: this.#options.envFile,
+      usernameEnv: this.#options.usernameEnv,
+      passwordEnv: this.#options.passwordEnv,
+      userAgent: this.#options.userAgent,
+      viewport: this.#options.viewport,
+      browserFactory: this.#options.browserFactory,
+      manualLoginTimeoutSeconds: options.manualTimeoutSeconds || this.#options.manualLoginTimeoutSeconds,
+      ...options,
+      debug: options.debug !== false ? (options.debug || true) : false,
+    });
+    return client.loginAndSaveSession({ manualFallback: true });
+  }
+
   async #ensureLoggedIn(options = {}) {
     const headless = options.headless ?? this.#options.headless;
     const storage = loadStorageState(this.#options.sessionFile);
