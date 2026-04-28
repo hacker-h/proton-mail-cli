@@ -160,7 +160,7 @@ export class ProtonMailBrowserClient {
       };
     } finally {
       await context.close().catch(() => {});
-      await browser.close().catch(() => {});
+      await browser?.close().catch(() => {});
     }
   }
 
@@ -200,7 +200,7 @@ export class ProtonMailBrowserClient {
       };
     } finally {
       await context.close().catch(() => {});
-      await browser.close().catch(() => {});
+      await browser?.close().catch(() => {});
     }
   }
 
@@ -274,7 +274,7 @@ export class ProtonMailBrowserClient {
           });
         }
         await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await browser?.close().catch(() => {});
         return resultWithError("Login cooldown active; restore the session before retrying", { cooldown: true });
       }
 
@@ -284,7 +284,7 @@ export class ProtonMailBrowserClient {
           return resultWithSession(resultWithError("Missing Proton Mail credentials"), { browser, context, page, debug });
         }
         await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await browser?.close().catch(() => {});
         return resultWithError("Missing Proton Mail credentials");
       }
 
@@ -301,7 +301,7 @@ export class ProtonMailBrowserClient {
           return resultWithSession(automatic, { browser, context, page, debug });
         }
         await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await browser?.close().catch(() => {});
         return automatic;
       }
 
@@ -316,7 +316,7 @@ export class ProtonMailBrowserClient {
           });
         }
         await context.close().catch(() => {});
-        await browser.close().catch(() => {});
+        await browser?.close().catch(() => {});
         return resultWithError("Automatic login completed but inbox was not reachable");
       }
 
@@ -344,38 +344,56 @@ export class ProtonMailBrowserClient {
 
   async #launch({ headless, storageState, debug = { enabled: false } }) {
     const launchArgs = ["--disable-blink-features=AutomationControlled"];
-    const launchOptions = {
-      headless: Boolean(headless),
-      args: launchArgs,
-    };
 
-    if (debug?.enabled) {
-      ensurePrivateDir(debug.profileDir);
-      launchOptions.headless = false;
-      launchArgs.push(`--remote-debugging-port=${debug.cdpPort}`, `--user-data-dir=${debug.profileDir}`);
-      if (debug.slowMo > 0) {
-        launchOptions.slowMo = debug.slowMo;
-      }
+    if (!debug?.enabled) {
+      const browser = await this.#options.browserFactory.launch({
+        headless: Boolean(headless),
+        args: launchArgs,
+      });
+      const context = await browser.newContext({
+        userAgent: this.#options.userAgent,
+        viewport: this.#options.viewport,
+        storageState: storageState || undefined,
+      });
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, "webdriver", {
+          configurable: true,
+          get: () => undefined,
+        });
+      });
+      const page = await context.newPage();
+      return { browser, context, page };
     }
 
-    const browser = await this.#options.browserFactory.launch({
-      ...launchOptions,
-    });
-    if (debug?.enabled) {
-      console.log(`[protonmail-debug] cdp=http://127.0.0.1:${debug.cdpPort} profile=${debug.profileDir}`);
-    }
-    const context = await browser.newContext({
+    ensurePrivateDir(debug.profileDir);
+    const persistentArgs = [...launchArgs, `--remote-debugging-port=${debug.cdpPort}`];
+    const persistentOptions = {
+      headless: false,
+      args: persistentArgs,
       userAgent: this.#options.userAgent,
       viewport: this.#options.viewport,
       storageState: storageState || undefined,
-    });
+    };
+    if (debug.slowMo > 0) {
+      persistentOptions.slowMo = debug.slowMo;
+    }
+    if (debug.executablePath) {
+      persistentOptions.executablePath = debug.executablePath;
+    }
+
+    const context = await this.#options.browserFactory.launchPersistentContext(debug.profileDir, persistentOptions);
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", {
         configurable: true,
         get: () => undefined,
       });
     });
-    const page = await context.newPage();
+
+    const browser = context.browser();
+
+    console.log(`[protonmail-debug] cdp=http://127.0.0.1:${debug.cdpPort} profile=${debug.profileDir}`);
+
+    const page = context.pages()[0] || (await context.newPage());
     return { browser, context, page };
   }
 }
