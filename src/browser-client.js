@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { resolveDebugConfig } from "./debug-config.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
@@ -32,6 +33,7 @@ export class ProtonMailBrowserClient {
       userAgent: options.userAgent || DEFAULT_USER_AGENT,
       viewport: options.viewport || DEFAULT_VIEWPORT,
       browserFactory: options.browserFactory || chromium,
+      debug: resolveDebugConfig(options, process.env),
     };
   }
 
@@ -80,6 +82,7 @@ export class ProtonMailBrowserClient {
       ({ browser, context, page } = await this.#launch({
         headless: settings.headless,
         storageState: storage.storageState,
+        debug: this.#options.debug,
       }));
 
       const navigation = await navigateToInbox(page);
@@ -130,8 +133,10 @@ export class ProtonMailBrowserClient {
     } catch (error) {
       return resultWithError(error?.message || "Unexpected Proton Mail login failure");
     } finally {
-      await context?.close().catch(() => {});
-      await browser?.close().catch(() => {});
+      if (!this.#options.debug?.keepOpenOnError) {
+        await context?.close().catch(() => {});
+        await browser?.close().catch(() => {});
+      }
     }
   }
 
@@ -223,6 +228,8 @@ export class ProtonMailBrowserClient {
   async #ensureLoggedIn(options = {}) {
     const headless = options.headless ?? this.#options.headless;
     const storage = loadStorageState(this.#options.sessionFile);
+    const debug = this.#options.debug;
+    const keepOpenOnError = Boolean(debug?.enabled && debug.keepOpenOnError);
     let browser;
     let context;
     let page;
@@ -231,15 +238,24 @@ export class ProtonMailBrowserClient {
       ({ browser, context, page } = await this.#launch({
         headless,
         storageState: storage.storageState,
+        debug,
       }));
 
       let navigation = await navigateToInbox(page);
       if (navigation.state === "inbox") {
-        return { success: true, browser, context, page };
+        return resultWithSession({ success: true }, { browser, context, page, debug });
       }
 
       const cooldown = getCooldownState(this.#options.sessionFile);
       if (cooldown.active) {
+        if (keepOpenOnError) {
+          return resultWithSession(resultWithError("Login cooldown active; restore the session before retrying", { cooldown: true }), {
+            browser,
+            context,
+            page,
+            debug,
+          });
+        }
         await context.close().catch(() => {});
         await browser.close().catch(() => {});
         return resultWithError("Login cooldown active; restore the session before retrying", { cooldown: true });
@@ -247,6 +263,9 @@ export class ProtonMailBrowserClient {
 
       const credentials = this.#loadCredentials();
       if (!credentials.ready) {
+        if (keepOpenOnError) {
+          return resultWithSession(resultWithError("Missing Proton Mail credentials"), { browser, context, page, debug });
+        }
         await context.close().catch(() => {});
         await browser.close().catch(() => {});
         return resultWithError("Missing Proton Mail credentials");
@@ -260,6 +279,9 @@ export class ProtonMailBrowserClient {
         sessionFile: this.#options.sessionFile,
       });
       if (!automatic.success) {
+        if (keepOpenOnError) {
+          return resultWithSession(automatic, { browser, context, page, debug });
+        }
         await context.close().catch(() => {});
         await browser.close().catch(() => {});
         return automatic;
@@ -267,13 +289,29 @@ export class ProtonMailBrowserClient {
 
       navigation = await waitForInboxOrLogin(page, 10000);
       if (navigation.state !== "inbox") {
+        if (keepOpenOnError) {
+          return resultWithSession(resultWithError("Automatic login completed but inbox was not reachable"), {
+            browser,
+            context,
+            page,
+            debug,
+          });
+        }
         await context.close().catch(() => {});
         await browser.close().catch(() => {});
         return resultWithError("Automatic login completed but inbox was not reachable");
       }
 
-      return { success: true, browser, context, page };
+      return resultWithSession({ success: true }, { browser, context, page, debug });
     } catch (error) {
+      if (keepOpenOnError) {
+        return resultWithSession(resultWithError(error?.message || "Unexpected Proton Mail browser failure"), {
+          browser,
+          context,
+          page,
+          debug,
+        });
+      }
       await context?.close().catch(() => {});
       await browser?.close().catch(() => {});
       return resultWithError(error?.message || "Unexpected Proton Mail browser failure");
@@ -286,11 +324,28 @@ export class ProtonMailBrowserClient {
     return { username, password, ready: Boolean(username && password) };
   }
 
-  async #launch({ headless, storageState }) {
-    const browser = await this.#options.browserFactory.launch({
+  async #launch({ headless, storageState, debug = { enabled: false } }) {
+    const launchArgs = ["--disable-blink-features=AutomationControlled"];
+    const launchOptions = {
       headless: Boolean(headless),
-      args: ["--disable-blink-features=AutomationControlled"],
+      args: launchArgs,
+    };
+
+    if (debug?.enabled) {
+      ensurePrivateDir(debug.profileDir);
+      launchOptions.headless = false;
+      launchArgs.push(`--remote-debugging-port=${debug.cdpPort}`, `--user-data-dir=${debug.profileDir}`);
+      if (debug.slowMo > 0) {
+        launchOptions.slowMo = debug.slowMo;
+      }
+    }
+
+    const browser = await this.#options.browserFactory.launch({
+      ...launchOptions,
     });
+    if (debug?.enabled) {
+      console.log(`[protonmail-debug] cdp=http://127.0.0.1:${debug.cdpPort} profile=${debug.profileDir}`);
+    }
     const context = await browser.newContext({
       userAgent: this.#options.userAgent,
       viewport: this.#options.viewport,
@@ -438,6 +493,19 @@ function clearCooldown(sessionFile) {
 
 function resultWithError(error, extra = {}) {
   return { success: false, error, ...extra };
+}
+
+function resultWithSession(result, { browser, context, page, debug }) {
+  if (!debug?.enabled) {
+    return { ...result, browser, context, page };
+  }
+  return {
+    ...result,
+    browser,
+    context,
+    page,
+    debug: { cdpEndpoint: `http://127.0.0.1:${debug.cdpPort}` },
+  };
 }
 
 function delay(ms) {
