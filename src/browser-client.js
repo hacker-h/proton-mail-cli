@@ -110,6 +110,7 @@ export class ProtonMailBrowserClient {
         username: credentials.username,
         password: credentials.password,
         sessionFile: this.#options.sessionFile,
+        suppressCooldown: Boolean(this.#options.debug?.enabled && this.#options.debug.suppressCooldown),
       });
       if (automatic.success) {
         return {
@@ -293,6 +294,7 @@ export class ProtonMailBrowserClient {
         username: credentials.username,
         password: credentials.password,
         sessionFile: this.#options.sessionFile,
+        suppressCooldown: Boolean(debug?.enabled && debug.suppressCooldown),
       });
       if (!automatic.success) {
         if (keepOpenOnError) {
@@ -722,7 +724,7 @@ async function completeAppsPageIfNeeded(page) {
   return false;
 }
 
-async function performLogin({ page, context, username, password, sessionFile }) {
+async function performLogin({ page, context, username, password, sessionFile, suppressCooldown = false }) {
   if (!page.url().includes("account.proton.me")) {
     await page.goto(MAIL_HOME_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
   }
@@ -761,18 +763,24 @@ async function performLogin({ page, context, username, password, sessionFile }) 
     const pageContent = await getPageContent(page);
 
     if (hasCaptcha(pageContent)) {
-      writeCooldown(sessionFile, "CAPTCHA detected during Proton Mail login");
+      if (!suppressCooldown) {
+        writeCooldown(sessionFile, "CAPTCHA detected during Proton Mail login");
+      }
       return resultWithError("CAPTCHA detected during Proton Mail login", { captcha: true, manualRequired: true });
     }
 
     if (/\/two-factor|\/totp/i.test(currentUrl)) {
-      writeCooldown(sessionFile, "Two-factor authentication required");
+      if (!suppressCooldown) {
+        writeCooldown(sessionFile, "Two-factor authentication required");
+      }
       return resultWithError("Two-factor authentication required", { twoFactor: true, manualRequired: true });
     }
 
     const wrongPassword = (await getAlertTexts(page)).find((text) => /incorrect login credentials|wrong password|invalid password/i.test(text));
     if (wrongPassword) {
-      writeCooldown(sessionFile, "Incorrect login credentials");
+      if (!suppressCooldown) {
+        writeCooldown(sessionFile, "Incorrect login credentials");
+      }
       return resultWithError("Incorrect login credentials");
     }
 
@@ -790,7 +798,9 @@ async function performLogin({ page, context, username, password, sessionFile }) 
     await delay(1000);
   }
 
-  writeCooldown(sessionFile, `Login timed out at ${page.url()}`);
+  if (!suppressCooldown) {
+    writeCooldown(sessionFile, `Login timed out at ${page.url()}`);
+  }
   return resultWithError("Automatic login timed out", { manualRequired: true });
 }
 
