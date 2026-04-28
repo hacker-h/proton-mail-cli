@@ -9,3 +9,7 @@ secrets/
 data/*.json
 data/*.log
 data/*.txt
+
+# Debug mode artifacts
+data/debug-profile/
+data/debug-chromium/
