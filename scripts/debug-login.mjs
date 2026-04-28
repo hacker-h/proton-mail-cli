@@ -67,20 +67,40 @@ const client = new ProtonMailBrowserClient({
 });
 
 let browser;
+let closing = false;
 
-process.on('SIGINT', async () => {
-  console.log('\n[protonmail-debug] Received SIGINT, closing browser...');
+// Orphan cleanup: pkill -f "remote-debugging-port=9222"
+
+async function shutdown(signal) {
+  if (closing) return;
+  closing = true;
+  console.log(`\n[protonmail-debug] Received ${signal}, closing browser...`);
   if (browser) {
     await browser.close().catch(() => {});
+    browser = null;
   }
   process.exit(130);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+process.on('uncaughtException', async (err) => {
+  console.error('[protonmail-debug] Uncaught exception:', err.message);
+  if (!closing && browser) {
+    closing = true;
+    await browser.close().catch(() => {});
+  }
+  process.exit(1);
 });
 
-process.on('SIGTERM', async () => {
-  if (browser) {
+process.on('unhandledRejection', async (reason) => {
+  console.error('[protonmail-debug] Unhandled rejection:', reason);
+  if (!closing && browser) {
+    closing = true;
     await browser.close().catch(() => {});
   }
-  process.exit(130);
+  process.exit(1);
 });
 
 console.log('[protonmail-debug] Starting debug login session...');
