@@ -10,6 +10,7 @@ const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const INBOX_URL = "https://mail.proton.me/u/0/inbox";
+export const MAIL_ALL_URL = "https://mail.proton.me/u/0/all-mail";
 const MAIL_HOME_URL = "https://mail.proton.me";
 const OTP_RE = /\b(\d{6})\b/;
 const CAPTCHA_TERMS = ["captcha", "challenge", "human verification", "hcaptcha"];
@@ -66,6 +67,7 @@ export class ProtonMailBrowserClient {
 
   async loginAndSaveSession(options = {}) {
     this.loadRuntimeEnv();
+    const mailUrl = resolveMailUrl(options);
     const settings = {
       headless: options.headless ?? this.#options.headless,
       manualFallback: options.manualFallback !== false,
@@ -85,7 +87,7 @@ export class ProtonMailBrowserClient {
         debug: this.#options.debug,
       }));
 
-      const navigation = await navigateToInbox(page);
+      const navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state === "inbox") {
         await dismissModals(page);
         await saveSession(context, this.#options.sessionFile);
@@ -113,6 +115,10 @@ export class ProtonMailBrowserClient {
         suppressCooldown: Boolean(this.#options.debug?.enabled && this.#options.debug.suppressCooldown),
       });
       if (automatic.success) {
+        const targetNavigation = await navigateToInbox(page, mailUrl);
+        if (targetNavigation.state !== "inbox") {
+          return resultWithError("Automatic login completed but target mail folder was not reachable");
+        }
         return {
           success: true,
           loginMethod: automatic.loginMethod || "automatic",
@@ -128,6 +134,7 @@ export class ProtonMailBrowserClient {
       return waitForManualLoginCompletion({
         page,
         context,
+        mailUrl,
         sessionFile: this.#options.sessionFile,
         timeoutSeconds: settings.timeoutSeconds,
       });
@@ -151,7 +158,7 @@ export class ProtonMailBrowserClient {
     const { browser, context, page } = session;
     try {
       await dismissModals(page);
-      const scan = await scanInbox(page, options.limit || 50);
+      const scan = await scanInboxWithFallback(page, options.limit || 50, resolveMailUrl(options));
       return {
         success: true,
         sessionValid: true,
@@ -174,7 +181,7 @@ export class ProtonMailBrowserClient {
     const { browser, context, page } = session;
     try {
       await dismissModals(page);
-      const scan = await scanInbox(page, options.limit || 50);
+      const scan = await scanInboxWithFallback(page, options.limit || 50, resolveMailUrl(options));
       const target = findMatchingMessage(scan.messages, options.matchText);
       if (!target) {
         return resultWithError("No matching Proton Mail message found", {
@@ -244,6 +251,7 @@ export class ProtonMailBrowserClient {
 
   async #ensureLoggedIn(options = {}) {
     const headless = options.headless ?? this.#options.headless;
+    const mailUrl = resolveMailUrl(options);
     const storage = loadStorageState(this.#options.sessionFile);
     const debug = this.#options.debug;
     const keepOpenOnError = Boolean(debug?.enabled && debug.keepOpenOnError);
@@ -258,7 +266,7 @@ export class ProtonMailBrowserClient {
         debug,
       }));
 
-      let navigation = await navigateToInbox(page);
+      let navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state === "inbox") {
         return resultWithSession({ success: true }, { browser, context, page, debug });
       }
@@ -305,10 +313,10 @@ export class ProtonMailBrowserClient {
         return automatic;
       }
 
-      navigation = await waitForInboxOrLogin(page, 10000);
+      navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state !== "inbox") {
         if (keepOpenOnError) {
-          return resultWithSession(resultWithError("Automatic login completed but inbox was not reachable"), {
+          return resultWithSession(resultWithError("Automatic login completed but target mail folder was not reachable"), {
             browser,
             context,
             page,
@@ -317,7 +325,7 @@ export class ProtonMailBrowserClient {
         }
         await context.close().catch(() => {});
         await browser?.close().catch(() => {});
-        return resultWithError("Automatic login completed but inbox was not reachable");
+        return resultWithError("Automatic login completed but target mail folder was not reachable");
       }
 
       return resultWithSession({ success: true }, { browser, context, page, debug });
@@ -570,8 +578,24 @@ async function saveSession(context, sessionFile) {
   } catch {}
 }
 
-async function navigateToInbox(page) {
-  await page.goto(INBOX_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+function resolveMailUrl(options = {}) {
+  const explicitMailUrl = typeof options.mailUrl === "string" ? options.mailUrl.trim() : "";
+  if (explicitMailUrl) {
+    return explicitMailUrl;
+  }
+  const folder = String(options.folder || "").trim().toLowerCase();
+  if (folder === "all" || folder === "all-mail") {
+    return MAIL_ALL_URL;
+  }
+  return INBOX_URL;
+}
+
+function isInboxUrl(url) {
+  return String(url || "").includes("/inbox");
+}
+
+async function navigateToInbox(page, url = INBOX_URL) {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
   return waitForInboxOrLogin(page, 15000);
 }
 
@@ -822,12 +846,16 @@ async function performLogin({ page, context, username, password, sessionFile, su
   return resultWithError("Automatic login timed out", { manualRequired: true });
 }
 
-async function waitForManualLoginCompletion({ page, context, sessionFile, timeoutSeconds }) {
+async function waitForManualLoginCompletion({ page, context, mailUrl = INBOX_URL, sessionFile, timeoutSeconds }) {
   const startedAt = Date.now();
   const timeoutMs = Math.max(5, timeoutSeconds) * 1000;
   while (Date.now() - startedAt <= timeoutMs) {
     const state = await waitForInboxOrLogin(page, 1500);
     if (state.state === "inbox") {
+      const navigation = await navigateToInbox(page, mailUrl);
+      if (navigation.state !== "inbox") {
+        return resultWithError("Manual login completed but target mail folder was not reachable", { manualRequired: true });
+      }
       await dismissModals(page);
       await saveSession(context, sessionFile);
       clearCooldown(sessionFile);
@@ -839,6 +867,7 @@ async function waitForManualLoginCompletion({ page, context, sessionFile, timeou
 }
 
 async function scanInbox(page, limit = 50) {
+  await page.waitForSelector('[data-testid="message-list-loaded"]', { timeout: 10000 }).catch(() => {});
   let rows = page.locator(MESSAGE_ROW_SELECTOR);
   let count = await rows.count();
   let previousCount = -1;
@@ -859,6 +888,21 @@ async function scanInbox(page, limit = 50) {
     } catch {}
   }
   return { inboxMessageCount: count, messages };
+}
+
+async function scanInboxWithFallback(page, limit = 50, mailUrl = INBOX_URL) {
+  const scan = await scanInbox(page, limit);
+  if (scan.inboxMessageCount > 0 || mailUrl === MAIL_ALL_URL || !isInboxUrl(page.url())) {
+    return scan;
+  }
+
+  const navigation = await navigateToInbox(page, MAIL_ALL_URL);
+  if (navigation.state !== "inbox") {
+    return scan;
+  }
+
+  await dismissModals(page);
+  return scanInbox(page, limit);
 }
 
 function findMatchingMessage(messages, matchText) {
@@ -895,7 +939,7 @@ async function openMessage(page, index) {
 }
 
 async function getOpenedMessageSubject(page, fallback) {
-  for (const candidate of [page.locator('[role="region"] h1').first(), page.locator("h1").first()]) {
+  for (const candidate of [page.locator('[data-testid*="subject"]').first(), page.locator('[role="region"] h1').first(), page.locator("h1").first()]) {
     try {
       const text = normalizeText(await candidate.innerText({ timeout: 1000 }));
       if (text) {
@@ -938,5 +982,7 @@ export const __internal = {
   defaultSessionFile: DEFAULT_SESSION_FILE,
   extractFirstOtpCode,
   findMatchingMessage,
+  MAIL_ALL_URL,
   matchOpenAiEmail,
+  resolveMailUrl,
 };
