@@ -80,6 +80,9 @@ export class ProtonMailBrowserClient {
     let context;
     let page;
 
+    const debug = this.#options.debug;
+    const keepOpenOnError = Boolean(debug?.enabled && debug.keepOpenOnError);
+
     try {
       ({ browser, context, page } = await this.#launch({
         headless: settings.headless,
@@ -92,18 +95,18 @@ export class ProtonMailBrowserClient {
         await dismissModals(page);
         await saveSession(context, this.#options.sessionFile);
         clearCooldown(this.#options.sessionFile);
-        return {
+        return resultWithSession({
           success: true,
           loginMethod: "session",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        };
+        }, { browser, context, page, debug });
       }
 
       if (!credentials.ready) {
-        return resultWithError("Missing Proton Mail credentials", {
+        return resultWithSession(resultWithError("Missing Proton Mail credentials", {
           envFileLoaded: this.#options.envFile || null,
-        });
+        }), { browser, context, page, debug });
       }
 
       const automatic = await performLogin({
@@ -117,28 +120,38 @@ export class ProtonMailBrowserClient {
       if (automatic.success) {
         const targetNavigation = await navigateToInbox(page, mailUrl);
         if (targetNavigation.state !== "inbox") {
-          return resultWithError("Automatic login completed but target mail folder was not reachable");
+          return resultWithSession(
+            resultWithError("Automatic login completed but target mail folder was not reachable"),
+            { browser, context, page, debug }
+          );
         }
-        return {
+        return resultWithSession({
           success: true,
           loginMethod: automatic.loginMethod || "automatic",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        };
+        }, { browser, context, page, debug });
       }
 
       if (!settings.manualFallback || settings.headless || automatic.manualRequired === false) {
-        return automatic;
+        return resultWithSession(automatic, { browser, context, page, debug });
       }
 
-      return waitForManualLoginCompletion({
+      const manualResult = await waitForManualLoginCompletion({
         page,
         context,
         mailUrl,
         sessionFile: this.#options.sessionFile,
         timeoutSeconds: settings.timeoutSeconds,
       });
+      return resultWithSession(manualResult, { browser, context, page, debug });
     } catch (error) {
+      if (keepOpenOnError) {
+        return resultWithSession(
+          resultWithError(error?.message || "Unexpected Proton Mail login failure"),
+          { browser, context, page, debug }
+        );
+      }
       return resultWithError(error?.message || "Unexpected Proton Mail login failure");
     } finally {
       if (!this.#options.debug?.keepOpenOnError) {
