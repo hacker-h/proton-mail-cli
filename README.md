@@ -149,6 +149,12 @@ PROTONMAIL_DEBUG=1 node scripts/debug-login.mjs
 
 This opens a headful Chromium browser with CDP enabled, keeps it open on failure, and suppresses cooldown writes. See [DEBUG.md](DEBUG.md) for full documentation including Playwright MCP attach instructions.
 
+## CI/CD
+
+Pull requests run offline gates only: install, typecheck, unit tests, and package smoke. Proton-facing checks are isolated in a scheduled/manual workflow that requires repository secrets and is allowed to fail for Proton-side drift such as CAPTCHA, selector changes, or backend auth changes.
+
+See [docs/ci.md](docs/ci.md) for the full gate contract, local commands, live-test secrets, and drift policy.
+
 ## Related
 
 - [ProtonMail/go-proton-api](https://github.com/ProtonMail/go-proton-api)
