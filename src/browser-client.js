@@ -13,7 +13,7 @@ const INBOX_URL = "https://mail.proton.me/u/0/inbox";
 export const MAIL_ALL_URL = "https://mail.proton.me/u/0/all-mail";
 const MAIL_HOME_URL = "https://mail.proton.me";
 const OTP_RE = /\b(\d{6})\b/;
-const CAPTCHA_TERMS = ["captcha", "challenge", "human verification", "hcaptcha"];
+const AUTH_CHALLENGE_TEXT_RE = /\b(captcha|hcaptcha|human verification|verify that you are human|verify you are human|security check)\b/iu;
 const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
 const POLL_INTERVAL_MS = 5000;
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
@@ -578,9 +578,48 @@ function truncate(value, max = 200) {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-function hasCaptcha(content) {
-  const lowered = String(content || "").toLowerCase();
-  return CAPTCHA_TERMS.some((term) => lowered.includes(term));
+async function hasAuthChallenge(page) {
+  const currentUrl = page.url();
+  if (/\/(captcha|human-verification|security-check)(\/|$|[?#])/iu.test(currentUrl)) {
+    return true;
+  }
+
+  if (page.frames().some((frame) => /hcaptcha|recaptcha|arkoselabs|captcha/iu.test(frame.url()))) {
+    return true;
+  }
+
+  const challengeSelectors = [
+    'iframe[src*="hcaptcha"]',
+    'iframe[src*="recaptcha"]',
+    '[data-testid*="captcha"]',
+    '[data-testid*="challenge"]',
+    '[class*="captcha"]',
+    '[id*="captcha"]',
+    '[class*="hcaptcha"]',
+    '[id*="hcaptcha"]',
+  ];
+
+  for (const selector of challengeSelectors) {
+    try {
+      if (await page.locator(selector).first().isVisible({ timeout: 250 })) {
+        return true;
+      }
+    } catch {}
+  }
+
+  return hasAuthChallengeText(await getVisiblePageText(page));
+}
+
+function hasAuthChallengeText(content) {
+  return AUTH_CHALLENGE_TEXT_RE.test(normalizeText(content));
+}
+
+async function getVisiblePageText(page) {
+  try {
+    return await page.locator("body").innerText({ timeout: 1000 });
+  } catch {
+    return "";
+  }
 }
 
 async function saveSession(context, sessionFile) {
@@ -699,8 +738,7 @@ async function waitForInboxOrLogin(page, timeoutMs) {
       return { state: "inbox", url: currentUrl };
     }
     if (currentUrl.includes("account.proton.me")) {
-      const content = await getPageContent(page);
-      if (hasCaptcha(content)) {
+      if (await hasAuthChallenge(page)) {
         return { state: "captcha", url: currentUrl };
       }
       if (await locateLoginEmailField(page, 500)) {
@@ -815,9 +853,7 @@ async function performLogin({ page, context, username, password, sessionFile, su
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30000) {
     const currentUrl = page.url();
-    const pageContent = await getPageContent(page);
-
-    if (hasCaptcha(pageContent)) {
+    if (await hasAuthChallenge(page)) {
       if (!suppressCooldown) {
         writeCooldown(sessionFile, "CAPTCHA detected during Proton Mail login");
       }
@@ -995,6 +1031,7 @@ export const __internal = {
   defaultSessionFile: DEFAULT_SESSION_FILE,
   extractFirstOtpCode,
   findMatchingMessage,
+  hasAuthChallengeText,
   MAIL_ALL_URL,
   matchOpenAiEmail,
   resolveMailUrl,
