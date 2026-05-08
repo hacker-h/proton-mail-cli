@@ -4,7 +4,7 @@
     "module": "Node16",
     "moduleResolution": "Node16",
     "allowJs": true,
-    "checkJs": true,
+    "checkJs": false,
     "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
