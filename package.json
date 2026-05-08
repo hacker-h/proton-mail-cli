@@ -1,0 +1,40 @@
+{
+  "name": "protonmail-api-client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.9",
+  "type": "module",
+  "files": [
+    "src/",
+    "scripts/",
+    "README.md",
+    "DEBUG.md",
+    "SECURITY.md",
+    "docs/ci.md"
+  ],
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "ci:offline": "pnpm typecheck && pnpm test:unit && npm pack --dry-run",
+    "test": "pnpm test:unit",
+    "test:unit": "node --test \"test/*.test.js\"",
+    "test:live": "PROTONMAIL_LIVE_TEST=1 node --test \"test/live/**/*.test.js\"",
+    "typecheck": "tsc --noEmit",
+    "debug:login": "node scripts/debug-login.mjs",
+    "login:probe": "node scripts/probe-login-state.mjs",
+    "session:capture": "node scripts/capture-session.mjs",
+    "session:cache": "node scripts/session-cache.mjs",
+    "session:secret": "node scripts/set-session-secret.mjs"
+  },
+  "dependencies": {
+    "openpgp": "^6.3.0",
+    "playwright-core": "^1.58.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "playwright": "^1.58.2",
+    "@types/node": "^22.0.0"
+  }
+}

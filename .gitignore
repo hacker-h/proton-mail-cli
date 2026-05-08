@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+.sisyphus/
+.claude/
+out/
+dist/
+*.tgz
+.env
+.env.*
+secrets/
+data/*.json
+data/*.log
+data/*.txt
+
+# Debug mode artifacts
+data/debug-profile/
+data/debug-chromium/
