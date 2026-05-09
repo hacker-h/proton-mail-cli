@@ -144,6 +144,26 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(missingRead.stderrText()).error.code, "MISSING_MESSAGE_ID");
   });
 
+  it("rejects unexpected positional arguments before dispatch", async () => {
+    const listIo = createIo();
+    const otpIo = createIo();
+    const readIo = createIo();
+    const list = mock.fn(async () => ({ messages: [] }));
+    const get = mock.fn(async () => ({ code: "123456" }));
+    const read = mock.fn(async () => ({ id: "msg1" }));
+
+    assert.equal(await runPmCli({ argv: ["ls", "extra", "--json"], clients: { mail: { list } }, ...listIo }), CLI_EXIT.USAGE);
+    assert.equal(await runPmCli({ argv: ["otp", "extra", "--json"], clients: { otp: { get } }, ...otpIo }), CLI_EXIT.USAGE);
+    assert.equal(await runPmCli({ argv: ["read", "msg1", "extra", "--json"], clients: { mail: { read } }, ...readIo }), CLI_EXIT.USAGE);
+
+    assert.equal(JSON.parse(listIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(JSON.parse(otpIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(JSON.parse(readIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(list.mock.callCount(), 0);
+    assert.equal(get.mock.callCount(), 0);
+    assert.equal(read.mock.callCount(), 0);
+  });
+
   it("honors quiet mode for human success output", async () => {
     const io = createIo();
     const list = mock.fn(async () => ({ messages: [{ id: "msg1", subject: "Hello" }] }));
