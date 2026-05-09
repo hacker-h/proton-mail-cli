@@ -168,11 +168,13 @@ export function parseArgv(argv) {
 
 export async function dispatchCommand({ command, args, global, clients = {} }) {
   if (command === "mail:list") {
+    expectArgs(args, 0, "pm ls");
     const data = await callInjected(clients.mail?.list, [clientOptions(global)], "pm ls");
     return { command, data, human: renderList(data) };
   }
 
   if (command === "mail:latest") {
+    expectArgs(args, 0, "pm mail latest");
     const data = await callInjected(clients.mail?.latest, [clientOptions(global)], "pm mail latest");
     return { command, data, human: renderObject(data) };
   }
@@ -182,17 +184,37 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     if (!messageId) {
       throw new CliError(CLI_EXIT.USAGE, "MISSING_MESSAGE_ID", "pm read requires <messageId>");
     }
+    expectArgs(args, 1, "pm read <messageId>");
     const data = await callInjected(clients.mail?.read, [messageId, clientOptions(global)], "pm read <messageId>");
     return { command, data, human: renderObject(data) };
   }
 
   if (command === "otp") {
+    expectArgs(args, 0, "pm otp");
     const data = await callInjected(clients.otp?.get, [clientOptions(global)], "pm otp");
     return { command, data, human: renderOtp(data) };
   }
 
   throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_COMMAND", `Unknown command: ${formatCommand(command, args)}`, {
     command,
+    args,
+  });
+}
+
+function expectArgs(args, expectedCount, commandLabel) {
+  if (args.length === expectedCount) return;
+  if (args.length < expectedCount) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_ARGUMENT", `${commandLabel} requires ${expectedCount} argument${expectedCount === 1 ? "" : "s"}`, {
+      command: commandLabel,
+      expected: expectedCount,
+      received: args.length,
+    });
+  }
+
+  throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", `${commandLabel} does not accept extra arguments`, {
+    command: commandLabel,
+    expected: expectedCount,
+    received: args.length,
     args,
   });
 }
