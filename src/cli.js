@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { doctorConfig, doctorSession, redact } from "./config.js";
 
 export const CLI_EXIT = Object.freeze({
   OK: 0,
@@ -191,6 +192,16 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     return { command, data, human: renderOtp(data) };
   }
 
+  if (command === "doctor:config") {
+    const data = doctorConfig(global);
+    return { command, data, human: renderDoctor(data) };
+  }
+
+  if (command === "doctor:session") {
+    const data = await doctorSession(global, clients);
+    return { command, data, human: renderDoctor(data) };
+  }
+
   throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_COMMAND", `Unknown command: ${formatCommand(command, args)}`, {
     command,
     args,
@@ -198,7 +209,7 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
@@ -261,6 +272,12 @@ function normalizeCommand(positionals) {
   if (["ls", "list", "inbox"].includes(first)) return { command: "mail:list", args: positionals.slice(1) };
   if (first === "read") return { command: "mail:read", args: positionals.slice(1) };
   if (first === "otp") return { command: "otp", args: positionals.slice(1) };
+
+  if (first === "doctor") {
+    if (second === "config") return { command: "doctor:config", args: rest };
+    if (second === "session" || second === "auth") return { command: "doctor:session", args: rest };
+    return { command: `doctor:${second || ""}`, args: rest };
+  }
 
   if (first === "mail") {
     if (!second || ["ls", "list", "inbox"].includes(second)) return { command: "mail:list", args: rest };
@@ -334,15 +351,15 @@ function normalizeError(error) {
     return {
       exitCode: error.exitCode,
       code: error.code,
-      message: error.message,
-      details: error.details,
+      message: redact(error.message),
+      details: redact(error.details),
     };
   }
 
   return {
     exitCode: CLI_EXIT.RUNTIME,
     code: "RUNTIME_ERROR",
-    message: error?.message || "Unexpected CLI failure",
+    message: redact(error?.message || "Unexpected CLI failure"),
   };
 }
 
@@ -368,6 +385,11 @@ function renderObject(data) {
 function renderOtp(data) {
   if (data?.code) return `${data.code}\n`;
   return renderObject(data);
+}
+
+function renderDoctor(data) {
+  const status = data?.status || "unknown";
+  return `${status}\n`;
 }
 
 function formatCommand(command, args) {

@@ -15,6 +15,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm mail latest/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
     assert.match(io.stdoutText(), /pm otp --json/u);
+    assert.match(io.stdoutText(), /pm doctor config --json/u);
     assert.equal(io.stderrText(), "");
   });
 
@@ -49,6 +50,8 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["inbox"]).command, "mail:list");
     assert.deepEqual(parseArgv(["mail", "list"]).command, "mail:list");
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
+    assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
+    assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
 
     const parsed = parseArgv([
       "mail",
@@ -153,6 +156,37 @@ describe("pm CLI runner", () => {
     assert.equal(exitCode, CLI_EXIT.OK);
     assert.equal(io.stdoutText(), "");
     assert.equal(io.stderrText(), "");
+  });
+
+  it("runs doctor config and session commands with stable JSON statuses", async () => {
+    const configIo = createIo();
+    const sessionIo = createIo();
+
+    assert.equal(await runPmCli({ argv: ["doctor", "config", "--json"], version: "1.2.3", ...configIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["doctor", "session", "--json"], version: "1.2.3", ...sessionIo }), CLI_EXIT.OK);
+
+    const config = JSON.parse(configIo.stdoutText());
+    const session = JSON.parse(sessionIo.stdoutText());
+    assert.equal(config.command, "doctor:config");
+    assert.equal(config.data.status, "ok");
+    assert.equal(session.command, "doctor:session");
+    assert.match(session.data.status, /missing_session|session_ready|session_unreadable/u);
+  });
+
+  it("redacts secret details in JSON errors", async () => {
+    const io = createIo();
+    const clients = {
+      mail: {
+        list: async () => {
+          throw new Error("password=abc user@example.com");
+        },
+      },
+    };
+
+    assert.equal(await runPmCli({ argv: ["ls", "--json"], clients, ...io }), CLI_EXIT.RUNTIME);
+    const envelope = JSON.parse(io.stderrText());
+    assert.equal(JSON.stringify(envelope).includes("abc"), false);
+    assert.equal(JSON.stringify(envelope).includes("user@example.com"), false);
   });
 });
 
