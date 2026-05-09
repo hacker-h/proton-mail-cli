@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { ApiError } from "./errors.js";
+import { ApiError, RateLimitError } from "./errors.js";
 import {
   DEFAULT_API_URL,
   DEFAULT_APP_VERSION,
@@ -14,6 +14,11 @@ export class ProtonHttp {
   #fetchImpl;
   #timeoutMs;
   #maxRetries;
+  #rateLimitMaxRetries;
+  #rateLimitBaseDelayMs;
+  #rateLimitMaxDelayMs;
+  #rateLimitJitterMs;
+  #delayImpl;
   #sessionStore;
   #debugHttp;
 
@@ -24,6 +29,12 @@ export class ProtonHttp {
     this.#fetchImpl = options.fetchImpl || fetch;
     this.#timeoutMs = options.timeoutMs || 30000;
     this.#maxRetries = options.maxRetries ?? 2;
+    const rateLimit = options.rateLimit || {};
+    this.#rateLimitMaxRetries = rateLimit.maxRetries ?? options.maxRateLimitRetries ?? this.#maxRetries;
+    this.#rateLimitBaseDelayMs = rateLimit.baseDelayMs ?? 200;
+    this.#rateLimitMaxDelayMs = rateLimit.maxDelayMs ?? 3000;
+    this.#rateLimitJitterMs = rateLimit.jitterMs ?? 100;
+    this.#delayImpl = options.delayImpl || delay;
     this.#sessionStore = options.sessionStore;
     this.#debugHttp = Boolean(options.debugHttp);
   }
@@ -54,9 +65,10 @@ export class ProtonHttp {
     const body = options.body !== undefined ? JSON.stringify(options.body) : undefined;
     let authRefreshAttempted = false;
     let attempt = 0;
+    let rateLimitAttempt = 0;
 
-    while (attempt <= this.#maxRetries) {
-      const isFinal = attempt === this.#maxRetries;
+    while (true) {
+      const isFinal = attempt >= this.#maxRetries;
       attempt++;
 
       try {
@@ -91,8 +103,28 @@ export class ProtonHttp {
           throw new ApiError(404, "NOT_FOUND", "Resource not found");
         }
 
-        if ((response.status === 429 || response.status >= 500) && !isFinal) {
-          await delay(backoffMs(attempt));
+        if (response.status === 429) {
+          const retryAfter = parseRetryAfter(response.headers);
+          if (rateLimitAttempt < this.#rateLimitMaxRetries) {
+            rateLimitAttempt++;
+            const waitMs = retryAfter ?? rateLimitBackoffMs(rateLimitAttempt, {
+              baseDelayMs: this.#rateLimitBaseDelayMs,
+              maxDelayMs: this.#rateLimitMaxDelayMs,
+              jitterMs: this.#rateLimitJitterMs,
+            });
+            this.#log("Rate limit response; backing off", { attempt: rateLimitAttempt, waitMs });
+            await this.#delayImpl(waitMs);
+            continue;
+          }
+          throw new RateLimitError("Proton rate limit retry budget exhausted", {
+            retryAfter,
+            attempts: rateLimitAttempt + 1,
+            payload,
+          });
+        }
+
+        if (response.status >= 500 && !isFinal) {
+          await this.#delayImpl(backoffMs(attempt));
           continue;
         }
 
@@ -114,7 +146,7 @@ export class ProtonHttp {
             message: error?.message,
           });
         }
-        await delay(backoffMs(attempt));
+        await this.#delayImpl(backoffMs(attempt));
       }
     }
 
@@ -252,4 +284,27 @@ async function parsePayload(response) {
 
 function backoffMs(attempt) {
   return Math.min(3000, 200 * 2 ** attempt);
+}
+
+function rateLimitBackoffMs(attempt, { baseDelayMs, maxDelayMs, jitterMs }) {
+  const exponentialDelay = Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, attempt - 1));
+  if (!jitterMs) return exponentialDelay;
+  return exponentialDelay + Math.floor(Math.random() * jitterMs);
+}
+
+function parseRetryAfter(headers) {
+  const rawValue = headers?.get?.("retry-after");
+  if (!rawValue) return null;
+
+  const seconds = Number(rawValue);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, Math.ceil(seconds * 1000));
+  }
+
+  const timestamp = Date.parse(rawValue);
+  if (Number.isFinite(timestamp)) {
+    return Math.max(0, timestamp - Date.now());
+  }
+
+  return null;
 }

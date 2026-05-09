@@ -1,6 +1,6 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { ProtonMailClient, Labels, ApiError } from "../src/index.js";
+import { ProtonMailClient, Labels, ApiError, RateLimitError } from "../src/index.js";
 
 function mockSessionStore(uid = "test-uid") {
   return {
@@ -17,6 +17,20 @@ function mockFetch(status, body) {
     text: async () => JSON.stringify(body),
     arrayBuffer: async () => new ArrayBuffer(0),
   }));
+}
+
+function mockResponse(status, body, headers = {}) {
+  const normalizedHeaders = new Map(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name) => normalizedHeaders.get(String(name).toLowerCase()) || null,
+      getSetCookie: () => [],
+    },
+    text: async () => JSON.stringify(body),
+    arrayBuffer: async () => new ArrayBuffer(0),
+  };
 }
 
 describe("ProtonMailClient", () => {
@@ -120,6 +134,97 @@ describe("ProtonMailClient", () => {
       assert.equal(err.status, 404);
       return true;
     });
+  });
+
+  it("backs off using Retry-After before retrying 429 responses", async () => {
+    const waits = [];
+    let calls = 0;
+    const fetchImpl = mock.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return mockResponse(429, { Code: 429, Error: "Too many requests" }, { "Retry-After": "2" });
+      }
+      return mockResponse(200, { Code: 1000, User: { ID: "u1" } });
+    });
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      delayImpl: async (ms) => waits.push(ms),
+      rateLimit: { maxRetries: 1 },
+    });
+
+    const user = await client.getUser();
+
+    assert.equal(user.ID, "u1");
+    assert.deepEqual(waits, [2000]);
+    assert.equal(fetchImpl.mock.calls.length, 2);
+  });
+
+  it("uses configurable exponential backoff when Retry-After is absent", async () => {
+    const waits = [];
+    let calls = 0;
+    const fetchImpl = mock.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return mockResponse(429, { Code: 429 });
+      }
+      return mockResponse(200, { Code: 1000, User: { ID: "u1" } });
+    });
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      delayImpl: async (ms) => waits.push(ms),
+      rateLimit: { maxRetries: 1, baseDelayMs: 25, maxDelayMs: 1000, jitterMs: 0 },
+    });
+
+    await client.getUser();
+
+    assert.deepEqual(waits, [25]);
+    assert.equal(fetchImpl.mock.calls.length, 2);
+  });
+
+  it("throws RateLimitError when the 429 retry budget is exhausted", async () => {
+    const fetchImpl = mock.fn(async () => mockResponse(429, { Code: 429 }, { "Retry-After": "1" }));
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      delayImpl: async () => {},
+      rateLimit: { maxRetries: 0 },
+    });
+
+    await assert.rejects(() => client.getUser(), (err) => {
+      assert.ok(err instanceof RateLimitError);
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 429);
+      assert.equal(err.code, "RATE_LIMITED");
+      assert.equal(err.retryAfter, 1000);
+      return true;
+    });
+  });
+
+  it("parses HTTP-date Retry-After values", async () => {
+    const waits = [];
+    const retryDate = new Date(Date.now() + 50).toUTCString();
+    let calls = 0;
+    const fetchImpl = mock.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return mockResponse(429, { Code: 429 }, { "Retry-After": retryDate });
+      }
+      return mockResponse(200, { Code: 1000, User: { ID: "u1" } });
+    });
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      delayImpl: async (ms) => waits.push(ms),
+      rateLimit: { maxRetries: 1 },
+    });
+
+    await client.getUser();
+
+    assert.equal(waits.length, 1);
+    assert.ok(waits[0] >= 0);
+    assert.ok(waits[0] <= 1000);
   });
 
   it("api() passthrough works", async () => {
