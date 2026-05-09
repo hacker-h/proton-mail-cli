@@ -17,6 +17,7 @@ const AUTH_CHALLENGE_TEXT_RE = /\b(captcha|hcaptcha|human verification|verify th
 const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
 const POLL_INTERVAL_MS = 5000;
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
+const PRIVATE_FILE_MODE = 0o600;
 
 export class ProtonMailBrowserClient {
   #options;
@@ -556,13 +557,7 @@ function getCooldownState(sessionFile) {
 
 function writeCooldown(sessionFile, reason) {
   const filePath = cooldownFile(sessionFile);
-  ensurePrivateDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, `${JSON.stringify({ lastFailedAt: new Date().toISOString(), reason }, null, 2)}\n`, "utf8");
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch (error) {
-    debugLog(`Failed to set private cooldown file permissions for ${filePath}`, error);
-  }
+  writePrivateJsonFile(filePath, { lastFailedAt: new Date().toISOString(), reason });
 }
 
 function clearCooldown(sessionFile) {
@@ -650,12 +645,23 @@ async function getVisiblePageText(page) {
 }
 
 async function saveSession(context, sessionFile) {
-  ensurePrivateDir(path.dirname(sessionFile));
-  await context.storageState({ path: sessionFile });
+  const storageState = await context.storageState();
+  writePrivateJsonFile(sessionFile, storageState);
+}
+
+function writePrivateJsonFile(filePath, value) {
+  ensurePrivateDir(path.dirname(filePath));
+  const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   try {
-    fs.chmodSync(sessionFile, 0o600);
+    fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+    fs.renameSync(tempFile, filePath);
   } catch (error) {
-    debugLog(`Failed to set private session file permissions for ${sessionFile}`, error);
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch {}
+    throw error;
   }
 }
 
@@ -1090,4 +1096,6 @@ export const __internal = {
   MAIL_ALL_URL,
   matchOpenAiEmail,
   resolveMailUrl,
+  saveSession,
+  writeCooldown,
 };
