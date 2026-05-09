@@ -82,7 +82,7 @@ const calendars = await client.api("GET", "/calendar/v1");
 
 ## Session Store Interface
 
-Your session store must implement at minimum:
+Your REST/API session store must implement at minimum:
 
 ```js
 {
@@ -95,6 +95,8 @@ Your session store must implement at minimum:
   invalidate(): Promise<void>
 }
 ```
+
+See [docs/session-store.md](docs/session-store.md) for the full method contract, stored-session schema, default browser session-file behavior, and a runnable in-memory reference implementation.
 
 ## Implemented
 
