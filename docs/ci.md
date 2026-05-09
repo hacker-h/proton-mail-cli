@@ -29,7 +29,7 @@ This package is currently private, so release automation creates GitHub Releases
 
 ## Live Proton Regression
 
-The live workflow is defined in `.github/workflows/live-proton.yml` and runs on pull requests, schedule, or manual dispatch.
+The live workflow is defined in `.github/workflows/live-proton.yml` and runs for trusted same-repository pull requests, pushes to `main`, schedule, or manual dispatch.
 
 Preferred repository secret:
 
@@ -61,7 +61,9 @@ Scheduled CI intentionally does not perform fresh username/password login when `
 
 ## Pull Request Live Login Cache
 
-Every pull request runs the live login regression. To avoid repeatedly logging in to Proton, the workflow restores an encrypted session cache scoped by branch name and a six-hour UTC time bucket.
+Same-repository pull requests run the live login regression, including Dependabot branches. Public forks stay offline-only, because they must not receive Proton credentials, session JSON, or the encrypted session cache key.
+
+To avoid repeatedly logging in to Proton, the workflow restores an encrypted session cache scoped by branch name and a six-hour UTC time bucket.
 
 Cache behavior:
 
@@ -74,6 +76,8 @@ Cache behavior:
 The cache is intentionally short-lived. New branch buckets fall back to the repository session secret, then save a refreshed encrypted session for later runs in the same six-hour window.
 
 Do not cache raw session JSON. The workflow only caches `.ci-proton/session.enc`.
+
+Dependabot live-login coverage uses Dependabot-scoped secrets with the same names as the Actions secrets. Keep these secrets limited to the dedicated Proton test account and rotate them if a dependency update or workflow log ever exposes session state.
 
 ## Capturing a Keep-Logged-In Session
 

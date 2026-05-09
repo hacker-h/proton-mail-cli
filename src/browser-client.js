@@ -17,6 +17,7 @@ const AUTH_CHALLENGE_TEXT_RE = /\b(captcha|hcaptcha|human verification|verify th
 const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
 const POLL_INTERVAL_MS = 5000;
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
+const PRIVATE_FILE_MODE = 0o600;
 
 export class ProtonMailBrowserClient {
   #options;
@@ -155,8 +156,8 @@ export class ProtonMailBrowserClient {
       return resultWithError(error?.message || "Unexpected Proton Mail login failure");
     } finally {
       if (!this.#options.debug?.keepOpenOnError) {
-        await context?.close().catch(() => {});
-        await browser?.close().catch(() => {});
+        await context?.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
       }
     }
   }
@@ -179,8 +180,8 @@ export class ProtonMailBrowserClient {
         messages: scan.messages,
       };
     } finally {
-      await context.close().catch(() => {});
-      await browser?.close().catch(() => {});
+      await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+      await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
     }
   }
 
@@ -219,8 +220,8 @@ export class ProtonMailBrowserClient {
         },
       };
     } finally {
-      await context.close().catch(() => {});
-      await browser?.close().catch(() => {});
+      await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+      await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
     }
   }
 
@@ -294,8 +295,8 @@ export class ProtonMailBrowserClient {
             debug,
           });
         }
-        await context.close().catch(() => {});
-        await browser?.close().catch(() => {});
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
         return resultWithError("Login cooldown active; restore the session before retrying", { cooldown: true });
       }
 
@@ -304,8 +305,8 @@ export class ProtonMailBrowserClient {
         if (keepOpenOnError) {
           return resultWithSession(resultWithError("Missing Proton Mail credentials"), { browser, context, page, debug });
         }
-        await context.close().catch(() => {});
-        await browser?.close().catch(() => {});
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
         return resultWithError("Missing Proton Mail credentials");
       }
 
@@ -321,8 +322,8 @@ export class ProtonMailBrowserClient {
         if (keepOpenOnError) {
           return resultWithSession(automatic, { browser, context, page, debug });
         }
-        await context.close().catch(() => {});
-        await browser?.close().catch(() => {});
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
         return automatic;
       }
 
@@ -336,8 +337,8 @@ export class ProtonMailBrowserClient {
             debug,
           });
         }
-        await context.close().catch(() => {});
-        await browser?.close().catch(() => {});
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
         return resultWithError("Automatic login completed but target mail folder was not reachable");
       }
 
@@ -351,8 +352,8 @@ export class ProtonMailBrowserClient {
           debug,
         });
       }
-      await context?.close().catch(() => {});
-      await browser?.close().catch(() => {});
+      await context?.close().catch(ignoreWithDebug("Failed to close browser context"));
+      await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
       return resultWithError(error?.message || "Unexpected Proton Mail browser failure");
     }
   }
@@ -431,6 +432,25 @@ export function defaultSessionFile() {
   return DEFAULT_SESSION_FILE;
 }
 
+function debugLog(message, error, envObject = process.env) {
+  if (!isDebugLoggingEnabled(envObject)) {
+    return;
+  }
+  const suffix = error?.message ? `: ${error.message}` : "";
+  console.warn(`[protonmail-debug] ${message}${suffix}`);
+}
+
+function isDebugLoggingEnabled(envObject = process.env) {
+  return envObject.PROTONMAIL_DEBUG === "1" || envObject.PROTONMAIL_DEBUG === "true";
+}
+
+function ignoreWithDebug(message, fallback) {
+  return (error) => {
+    debugLog(message, error);
+    return fallback;
+  };
+}
+
 function env(name, fallback = "") {
   const value = process.env[name];
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -464,7 +484,9 @@ function ensurePrivateDir(dirPath) {
   ensureDir(dirPath);
   try {
     fs.chmodSync(dirPath, 0o700);
-  } catch {}
+  } catch (error) {
+    debugLog(`Failed to set private directory permissions for ${dirPath}`, error);
+  }
 }
 
 function loadEnvFile(filePath) {
@@ -527,18 +549,15 @@ function getCooldownState(sessionFile) {
       return { active: false };
     }
     return { active: Date.now() - lastFailedAt < LOGIN_COOLDOWN_MS };
-  } catch {
+  } catch (error) {
+    debugLog(`Failed to read login cooldown file ${filePath}`, error);
     return { active: false };
   }
 }
 
 function writeCooldown(sessionFile, reason) {
   const filePath = cooldownFile(sessionFile);
-  ensurePrivateDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, `${JSON.stringify({ lastFailedAt: new Date().toISOString(), reason }, null, 2)}\n`, "utf8");
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch {}
+  writePrivateJsonFile(filePath, { lastFailedAt: new Date().toISOString(), reason });
 }
 
 function clearCooldown(sessionFile) {
@@ -604,7 +623,9 @@ async function hasAuthChallenge(page) {
       if (await page.locator(selector).first().isVisible({ timeout: 250 })) {
         return true;
       }
-    } catch {}
+    } catch (error) {
+      debugLog(`Auth challenge selector check failed for ${selector}`, error);
+    }
   }
 
   return hasAuthChallengeText(await getVisiblePageText(page));
@@ -617,17 +638,31 @@ function hasAuthChallengeText(content) {
 async function getVisiblePageText(page) {
   try {
     return await page.locator("body").innerText({ timeout: 1000 });
-  } catch {
+  } catch (error) {
+    debugLog("Failed to read visible page text", error);
     return "";
   }
 }
 
 async function saveSession(context, sessionFile) {
-  ensurePrivateDir(path.dirname(sessionFile));
-  await context.storageState({ path: sessionFile });
+  const storageState = await context.storageState();
+  writePrivateJsonFile(sessionFile, storageState);
+}
+
+function writePrivateJsonFile(filePath, value) {
+  ensurePrivateDir(path.dirname(filePath));
+  const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   try {
-    fs.chmodSync(sessionFile, 0o600);
-  } catch {}
+    fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+    fs.renameSync(tempFile, filePath);
+  } catch (error) {
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch {}
+    throw error;
+  }
 }
 
 function resolveMailUrl(options = {}) {
@@ -657,7 +692,9 @@ async function hasInboxIndicators(page) {
       if (await page.locator(selector).first().isVisible({ timeout: 1000 })) {
         return true;
       }
-    } catch {}
+    } catch (error) {
+      debugLog(`Inbox indicator selector check failed for ${selector}`, error);
+    }
   }
   return false;
 }
@@ -665,7 +702,8 @@ async function hasInboxIndicators(page) {
 async function getPageContent(page) {
   try {
     return await page.content();
-  } catch {
+  } catch (error) {
+    debugLog("Failed to read page content", error);
     return "";
   }
 }
@@ -679,7 +717,9 @@ async function locateLoginEmailField(page, timeout = 15000) {
     try {
       await candidate.waitFor({ state: "visible", timeout });
       return candidate;
-    } catch {}
+    } catch (error) {
+      debugLog("Login email field candidate did not become visible", error);
+    }
   }
   return null;
 }
@@ -693,7 +733,9 @@ async function locateLoginPasswordField(page, timeout = 10000) {
     try {
       await candidate.waitFor({ state: "visible", timeout });
       return candidate;
-    } catch {}
+    } catch (error) {
+      debugLog("Login password field candidate did not become visible", error);
+    }
   }
   return null;
 }
@@ -707,7 +749,9 @@ async function locateSignInButton(page, timeout = 10000) {
     try {
       await candidate.waitFor({ state: "visible", timeout });
       return candidate;
-    } catch {}
+    } catch (error) {
+      debugLog("Sign-in button candidate did not become visible", error);
+    }
   }
   return null;
 }
@@ -722,7 +766,9 @@ async function locateStaySignedInCheckbox(page) {
       if (await candidate.isVisible({ timeout: 1000 })) {
         return candidate;
       }
-    } catch {}
+    } catch (error) {
+      debugLog("Stay-signed-in checkbox candidate check failed", error);
+    }
   }
   return null;
 }
@@ -760,7 +806,9 @@ async function getAlertTexts(page) {
       if (text) {
         texts.push(text);
       }
-    } catch {}
+    } catch (error) {
+      debugLog(`Failed to read alert text at index ${index}`, error);
+    }
   }
   return texts;
 }
@@ -786,10 +834,10 @@ async function dismissModals(page) {
         }
       }
       return false;
-    }, modalSelector).catch(() => false);
+    }, modalSelector).catch(ignoreWithDebug("Failed to evaluate modal dismissal", false));
 
     if (!clicked) {
-      await page.keyboard.press("Escape").catch(() => {});
+      await page.keyboard.press("Escape").catch(ignoreWithDebug("Failed to dismiss modal with Escape"));
     }
     dismissed = true;
     await delay(400);
@@ -812,7 +860,9 @@ async function completeAppsPageIfNeeded(page) {
         await target.click({ timeout: 5000 });
         return true;
       }
-    } catch {}
+    } catch (error) {
+      debugLog("Apps page mail target candidate check failed", error);
+    }
   }
   return false;
 }
@@ -837,11 +887,13 @@ async function performLogin({ page, context, username, password, sessionFile, su
   const staySignedIn = await locateStaySignedInCheckbox(page);
   if (staySignedIn) {
     try {
-      const checked = await staySignedIn.isChecked().catch(() => true);
+      const checked = await staySignedIn.isChecked().catch(ignoreWithDebug("Failed to read stay-signed-in checkbox state", true));
       if (!checked) {
         await staySignedIn.check({ force: true });
       }
-    } catch {}
+    } catch (error) {
+      debugLog("Failed to enable stay-signed-in checkbox", error);
+    }
   }
 
   const signInButton = await locateSignInButton(page, 10000);
@@ -916,14 +968,14 @@ async function waitForManualLoginCompletion({ page, context, mailUrl = INBOX_URL
 }
 
 async function scanInbox(page, limit = 50) {
-  await page.waitForSelector('[data-testid="message-list-loaded"]', { timeout: 10000 }).catch(() => {});
+  await page.waitForSelector('[data-testid="message-list-loaded"]', { timeout: 10000 }).catch(ignoreWithDebug("Message list loaded marker did not appear"));
   let rows = page.locator(MESSAGE_ROW_SELECTOR);
   let count = await rows.count();
   let previousCount = -1;
   let attempts = 0;
   while (count > 0 && count < limit && attempts < 10 && count !== previousCount) {
     previousCount = count;
-    await rows.nth(count - 1).scrollIntoViewIfNeeded().catch(() => {});
+    await rows.nth(count - 1).scrollIntoViewIfNeeded().catch(ignoreWithDebug(`Failed to scroll message row ${count - 1} into view`));
     await delay(1000);
     rows = page.locator(MESSAGE_ROW_SELECTOR);
     count = await rows.count();
@@ -934,7 +986,9 @@ async function scanInbox(page, limit = 50) {
   for (let index = 0; index < Math.min(count, limit); index += 1) {
     try {
       messages.push({ index, preview: truncate(await rows.nth(index).innerText({ timeout: 1500 }), 240) });
-    } catch {}
+    } catch (error) {
+      debugLog(`Failed to read message preview at index ${index}`, error);
+    }
   }
   return { inboxMessageCount: count, messages };
 }
@@ -978,11 +1032,12 @@ function findMatchingMessage(messages, matchText) {
 
 async function openMessage(page, index) {
   const locator = page.locator(MESSAGE_ROW_SELECTOR).nth(index);
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.scrollIntoViewIfNeeded().catch(ignoreWithDebug(`Failed to scroll message row ${index} into view`));
   try {
     await locator.click({ timeout: 5000 });
-  } catch {
-    await locator.evaluate((node) => node.click()).catch(() => {});
+  } catch (error) {
+    debugLog(`Timed click failed for message row ${index}; trying DOM click`, error);
+    await locator.evaluate((node) => node.click()).catch(ignoreWithDebug(`DOM click failed for message row ${index}`));
   }
   await page.waitForSelector('[data-testid="content-iframe"]', { timeout: 10000 });
 }
@@ -994,7 +1049,9 @@ async function getOpenedMessageSubject(page, fallback) {
       if (text) {
         return text;
       }
-    } catch {}
+    } catch (error) {
+      debugLog("Message subject candidate read failed", error);
+    }
   }
   return truncate(fallback, 120);
 }
@@ -1006,7 +1063,9 @@ async function expandOriginalMessageIfNeeded(frame) {
       await trigger.click({ timeout: 3000 });
       await delay(1500);
     }
-  } catch {}
+  } catch (error) {
+    debugLog("Failed to expand original message content", error);
+  }
 }
 
 async function extractOpenedMessage(page, fallbackPreview) {
@@ -1032,7 +1091,11 @@ export const __internal = {
   extractFirstOtpCode,
   findMatchingMessage,
   hasAuthChallengeText,
+  debugLog,
+  isDebugLoggingEnabled,
   MAIL_ALL_URL,
   matchOpenAiEmail,
   resolveMailUrl,
+  saveSession,
+  writeCooldown,
 };
