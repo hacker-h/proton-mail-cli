@@ -163,6 +163,10 @@ if (otp.success) {
 - Session files contain secret-bearing browser state and should stay untracked.
 - Saved sessions are reusable but not permanent. For long-running bots, treat `SessionExpiredError` or result code `SESSION_EXPIRED` as the signal to rotate the session file before retrying work.
 
+## Security
+
+This repo handles secret-bearing browser session state (Playwright storage state). Read `SECURITY.md` before using CI secrets or sharing logs.
+
 ## REST/API Usage
 
 ```js
@@ -266,6 +270,33 @@ PROTONMAIL_DEBUG=1 node scripts/debug-login.mjs
 This opens a headful Chromium browser with CDP enabled, keeps it open on failure, and suppresses cooldown writes. See [DEBUG.md](DEBUG.md) for full debug-mode documentation and [docs/troubleshooting.md](docs/troubleshooting.md) for CAPTCHA, selector drift, cooldown reset, and bug-report runbooks.
 
 Debug mode records structured `debugEvents` for selector fallbacks, navigation timeouts, CAPTCHA detection, and message extraction failures. Events redact secret-bearing fields and email-like values before they are returned or printed.
+
+## Environment Variables
+
+This project uses a small set of `PROTONMAIL_*` environment variables for live tests, session seeding, and debug mode.
+
+Notes:
+
+- Values marked **Secret** must never be committed or printed (see `SECURITY.md`).
+- When `PROTONMAIL_ENV_FILE` is not set, the browser client will also try `./env.env` and `./.env` at repo root.
+- Session file paths are not secrets themselves, but the referenced files typically are.
+
+| Variable | Purpose | Secret | Values / Defaults | Used by |
+|---|---|---:|---|---|
+| `PROTONMAIL_USERNAME` | Proton test account username for fresh login | Yes | Required for credential login; typically an email address; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_PASSWORD` | Proton test account password for fresh login | Yes | Required for credential login; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_ENV_FILE` | Absolute path to an env file containing credentials | No | Default: unset; if unset, tries `./env.env` then `./.env` | `src/browser-client.js`, `scripts/debug-login.mjs` |
+| `PROTONMAIL_SESSION_FILE` | Override path to the Playwright session JSON file for scripts | No | Default (script behavior): `data/protonmail-auth.json` | `scripts/capture-session.mjs`, `scripts/debug-login.mjs`, `scripts/set-session-secret.mjs` |
+| `PROTONMAIL_SESSION_JSON` | Seed session JSON (minimized Playwright storage state) for CI/live tests | Yes | Default: unset; when set, CI writes it to an isolated session file before running live tests | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md`, `scripts/capture-session.mjs`, `scripts/set-session-secret.mjs`, `DEBUG.md` |
+| `PROTONMAIL_SESSION_CACHE_KEY` | Encryption key for short-lived cached session payloads (`.ci-proton/session.enc`) | Yes | Default: unset; when unset, workflow skips saving cache; if a cache exists, decryption requires this key. Recommended: ≥32 random bytes (see `SECURITY.md`) | `.github/workflows/live-proton.yml`, `scripts/session-cache.mjs`, `docs/ci.md` |
+| `PROTONMAIL_LIVE_TEST` | Enable live Proton regression tests | No | `1` enables; default is disabled (`0`/unset) | `package.json` (`pnpm test:live`), `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_LIVE_SESSION_FILE` | Path to the live-test session file used by `pnpm test:live` | No | Default (workflow): `.ci-proton/session.json`; when set and file exists, live tests reuse it | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js` |
+| `PROTONMAIL_LIVE_HEADLESS` | Control headless mode for live tests | No | Default behavior: headless unless set to `0` | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js` |
+| `PROTONMAIL_ALLOW_FRESH_LOGIN` | Allow fresh username/password login in live tests when no session is seeded | No | `1` allows; default is `0`/unset (live tests prefer seeded session) | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js` |
+| `PROTONMAIL_DEBUG` | Enable debug mode (headful, verbose, keep browser open on error) | No | `1` or `true` enables; default disabled | `src/debug-config.js`, `src/browser-client.js`, `scripts/debug-login.mjs`, `test/debug-config.test.js`, `test/browser-client.test.js`, `README.md`, `DEBUG.md` |
+| `PROTONMAIL_DEBUG_CDP_PORT` | Override Chrome DevTools Protocol port in debug mode | No | Default `9222` | `src/debug-config.js`, `scripts/debug-login.mjs`, `DEBUG.md` |
+| `PROTONMAIL_DEBUG_PROFILE_DIR` | Override the debug browser profile directory | No | Default `<repo>/data/debug-profile` | `src/debug-config.js`, `scripts/debug-login.mjs`, `scripts/capture-session.mjs`, `DEBUG.md` |
+| `PROTONMAIL_DEBUG_CHROMIUM` | Override Chromium executable path for debug runs | No | Default: auto (Playwright-managed Chromium unless overridden) | `src/debug-config.js`, `scripts/debug-login.mjs`, `DEBUG.md` |
 
 ## CI/CD
 
