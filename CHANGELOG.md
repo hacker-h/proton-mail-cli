@@ -1,3 +1,16 @@
+# [1.2.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.1.2...v1.2.0) (2026-05-09)
+
+
+### Bug Fixes
+
+* **browser:** move default session path ([ab58a69](https://github.com/hacker-h/proton-mail-cli/commit/ab58a69f0a0a7d8c753bf706a33c47294775d726))
+* merge main browser refactor with CLI config dispatch ([981eec3](https://github.com/hacker-h/proton-mail-cli/commit/981eec386dee2be74ca69538e3ef37ed6f7d186f))
+
+
+### Features
+
+* **cli:** add config doctor commands ([f522823](https://github.com/hacker-h/proton-mail-cli/commit/f52282342c4001ba66acf681e687d1b2397f3a09))
+
 ## [1.1.2](https://github.com/hacker-h/proton-mail-cli/compare/v1.1.1...v1.1.2) (2026-05-09)
 
 
