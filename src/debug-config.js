@@ -68,7 +68,10 @@ export function resolveDebugConfig(options, env) {
       overrides.executablePath !== undefined
         ? overrides.executablePath
         : env.PROTONMAIL_DEBUG_CHROMIUM || "",
-    manualTimeoutSeconds: 1800,
+    manualTimeoutSeconds: parsePositiveInt(
+      overrides.manualTimeoutSeconds ?? env.PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS ?? env.PROTONMAIL_DEBUG_TIMEOUT_SECONDS,
+      1800
+    ),
     suppressCooldown: true,
     keepOpenOnError: true,
     slowMo: overrides.slowMo !== undefined ? overrides.slowMo : 0,
@@ -76,4 +79,14 @@ export function resolveDebugConfig(options, env) {
     persistProfile:
       overrides.persistProfile !== undefined ? overrides.persistProfile : false,
   };
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

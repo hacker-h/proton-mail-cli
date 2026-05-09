@@ -46,6 +46,7 @@ const client = new ProtonMailBrowserClient({
 | `PROTONMAIL_DEBUG_CDP_PORT` | `9222` | CDP port |
 | `PROTONMAIL_DEBUG_PROFILE_DIR` | `<repo>/data/debug-profile` | Browser profile dir |
 | `PROTONMAIL_DEBUG_CHROMIUM` | (auto) | Chromium binary path |
+| `PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS` | `1800` | Manual login wait timeout |
 
 ## How to Attach Manually
 
@@ -86,11 +87,11 @@ Debug mode ALWAYS uses an isolated profile directory:
 
 ## Known Caveats
 
-- **Proton CAPTCHA**: If Proton Mail shows a CAPTCHA, you must solve it manually in the browser window. The debug session will wait up to 30 minutes (configurable via `--timeout`).
+- **Proton CAPTCHA**: If Proton Mail shows a CAPTCHA, you must solve it manually in the browser window. The debug session will wait up to 30 minutes by default (configurable via `--timeout`, `PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS`, or `debug.manualTimeoutSeconds`).
 - **2FA/TOTP**: The automated login flow can detect Proton's 2FA/TOTP page and returns `{ success: false, twoFactor: true, manualRequired: true }`, but it does not generate or submit TOTP codes. Use debug/headful mode to complete 2FA manually, save the session, and run later automation from that saved session.
 - **CI login**: Do not expect CI to solve 2FA/TOTP. CI should use `PROTONMAIL_SESSION_JSON` or the encrypted session cache produced from a manually completed login.
 - **Port collision**: If port 9222 is already in use (e.g., by Playwright MCP), use `--port 9223` or set `PROTONMAIL_DEBUG_CDP_PORT=9223`.
-- **Chromium install**: On first run, Playwright may need to install Chromium. This is automatic.
+- **Chromium install**: The runtime dependency is `playwright-core`, which does not download browsers by itself. This repo also installs `playwright` as a dev dependency so local development can run `pnpm exec playwright install chromium`. Package consumers must either install a compatible Chromium themselves and pass `debug.executablePath` / `PROTONMAIL_DEBUG_CHROMIUM`, or include `playwright` and run its browser installer.
 
 ## Cleanup Commands
 

@@ -233,6 +233,11 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
   });
 }
 
+/**
+ * @param {string[]} args
+ * @param {number} expectedCount
+ * @param {string} commandLabel
+ */
 function expectArgs(args, expectedCount, commandLabel) {
   if (args.length === expectedCount) return;
   if (args.length < expectedCount) {

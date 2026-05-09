@@ -171,6 +171,8 @@ jobs:
         run: pnpm session:secret -- --repo "$GITHUB_REPOSITORY"
 ```
 
+The package runtime imports `playwright-core`, which does not install browser binaries. Live CI and local live checks must install the repo's `playwright` dev dependency and run `pnpm exec playwright install chromium`, or provide a compatible Chromium path through `PROTONMAIL_DEBUG_CHROMIUM`.
+
 Use a fine-scoped token for `SESSION_SECRET_ROTATION_TOKEN` that can update Actions secrets in this repository. Do not use this refresh job for forked pull requests.
 
 ## Capturing a Keep-Logged-In Session
