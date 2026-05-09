@@ -89,7 +89,8 @@ describe("ProtonMailBrowserClient exports", () => {
   });
 
   it("provides a default session file path", () => {
-    assert.ok(defaultSessionFile().endsWith("data/protonmail-auth.json"));
+    assert.ok(defaultSessionFile().endsWith("protonmail-auth.json"));
+    assert.equal(defaultSessionFile().includes("/data/"), false);
   });
 
   it("exports a named session expiry error type", () => {

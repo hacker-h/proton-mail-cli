@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { debugLog } from "./browser-debug.js";
+import { defaultSessionFilePath } from "./config.js";
 import { SessionExpiredError } from "./errors.js";
 
 /**
@@ -12,8 +13,7 @@ import { SessionExpiredError } from "./errors.js";
  */
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DATA_DIR = path.join(ROOT_DIR, "data");
-export const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
+export const DEFAULT_SESSION_FILE = defaultSessionFilePath();
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
 const PRIVATE_FILE_MODE = 0o600;
 

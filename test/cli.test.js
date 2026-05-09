@@ -1,5 +1,8 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { CLI_EXIT, parseArgv, runPmCli } from "../src/index.js";
 
@@ -15,6 +18,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm mail latest/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
     assert.match(io.stdoutText(), /pm otp --json/u);
+    assert.match(io.stdoutText(), /pm doctor config --json/u);
     assert.equal(io.stderrText(), "");
   });
 
@@ -49,6 +53,8 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["inbox"]).command, "mail:list");
     assert.deepEqual(parseArgv(["mail", "list"]).command, "mail:list");
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
+    assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
+    assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
 
     const parsed = parseArgv([
       "mail",
@@ -76,11 +82,15 @@ describe("pm CLI runner", () => {
       messages: [{ id: "msg1", subject: "Hello" }],
       options,
     }));
+    const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pm-config-home-"));
 
-    const exitCode = await runPmCli({
-      argv: ["ls", "--timeout", "20", "--session", "session.json"],
-      clients: { mail: { list } },
-      ...io,
+    let exitCode;
+    await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
+      exitCode = await runPmCli({
+        argv: ["ls", "--timeout", "20", "--session", "session.json"],
+        clients: { mail: { list } },
+        ...io,
+      });
     });
 
     assert.equal(exitCode, CLI_EXIT.OK);
@@ -88,8 +98,65 @@ describe("pm CLI runner", () => {
     assert.equal(list.mock.callCount(), 1);
     assert.deepEqual(list.mock.calls[0].arguments[0], {
       timeout: 20,
-      config: null,
-      session: "session.json",
+      config: path.join(configHome, "proton-mail-cli", "config.json"),
+      session: path.resolve("session.json"),
+      quiet: false,
+      verbose: false,
+      format: "human",
+    });
+  });
+
+  it("passes env session and timeout values to normal mail dispatch", async () => {
+    const io = createIo();
+    const list = mock.fn(async (options) => ({ messages: [], options }));
+
+    await withEnv({
+      XDG_CONFIG_HOME: "/tmp/pm-config-home",
+      XDG_CACHE_HOME: "/tmp/pm-cache-home",
+      PROTONMAIL_CONFIG_FILE: undefined,
+      PROTONMAIL_SESSION_FILE: "/env/session.json",
+      PROTONMAIL_TIMEOUT_SECONDS: "42",
+    }, async () => {
+      const exitCode = await runPmCli({ argv: ["ls"], clients: { mail: { list } }, ...io });
+
+      assert.equal(exitCode, CLI_EXIT.OK);
+    });
+
+    assert.equal(list.mock.callCount(), 1);
+    assert.deepEqual(list.mock.calls[0].arguments[0], {
+      timeout: 42,
+      config: path.join("/tmp/pm-config-home", "proton-mail-cli", "config.json"),
+      session: "/env/session.json",
+      quiet: false,
+      verbose: false,
+      format: "human",
+    });
+  });
+
+  it("passes config-file session and timeout values to normal mail dispatch", async () => {
+    const io = createIo();
+    const list = mock.fn(async (options) => ({ messages: [], options }));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-cli-config-"));
+    const configPath = path.join(tempDir, "config.json");
+    fs.writeFileSync(configPath, JSON.stringify({ sessionFile: "/config/session.json", timeoutSeconds: 33 }));
+
+    await withEnv({
+      XDG_CONFIG_HOME: "/tmp/pm-config-home",
+      XDG_CACHE_HOME: "/tmp/pm-cache-home",
+      PROTONMAIL_CONFIG_FILE: undefined,
+      PROTONMAIL_SESSION_FILE: undefined,
+      PROTONMAIL_TIMEOUT_SECONDS: undefined,
+    }, async () => {
+      const exitCode = await runPmCli({ argv: ["ls", "--config", configPath], clients: { mail: { list } }, ...io });
+
+      assert.equal(exitCode, CLI_EXIT.OK);
+    });
+
+    assert.equal(list.mock.callCount(), 1);
+    assert.deepEqual(list.mock.calls[0].arguments[0], {
+      timeout: 33,
+      config: configPath,
+      session: "/config/session.json",
       quiet: false,
       verbose: false,
       format: "human",
@@ -174,6 +241,37 @@ describe("pm CLI runner", () => {
     assert.equal(io.stdoutText(), "");
     assert.equal(io.stderrText(), "");
   });
+
+  it("runs doctor config and session commands with stable JSON statuses", async () => {
+    const configIo = createIo();
+    const sessionIo = createIo();
+
+    assert.equal(await runPmCli({ argv: ["doctor", "config", "--json"], version: "1.2.3", ...configIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["doctor", "session", "--json"], version: "1.2.3", ...sessionIo }), CLI_EXIT.OK);
+
+    const config = JSON.parse(configIo.stdoutText());
+    const session = JSON.parse(sessionIo.stdoutText());
+    assert.equal(config.command, "doctor:config");
+    assert.equal(config.data.status, "ok");
+    assert.equal(session.command, "doctor:session");
+    assert.match(session.data.status, /missing_session|session_ready|session_unreadable/u);
+  });
+
+  it("redacts secret details in JSON errors", async () => {
+    const io = createIo();
+    const clients = {
+      mail: {
+        list: async () => {
+          throw new Error("password=abc user@example.com");
+        },
+      },
+    };
+
+    assert.equal(await runPmCli({ argv: ["ls", "--json"], clients, ...io }), CLI_EXIT.RUNTIME);
+    const envelope = JSON.parse(io.stderrText());
+    assert.equal(JSON.stringify(envelope).includes("abc"), false);
+    assert.equal(JSON.stringify(envelope).includes("user@example.com"), false);
+  });
 });
 
 function createIo() {
@@ -185,4 +283,30 @@ function createIo() {
     stdoutText: () => stdout,
     stderrText: () => stderr,
   };
+}
+
+async function withEnv(values, callback) {
+  const previous = {};
+  for (const key of Object.keys(values)) {
+    previous[key] = process.env[key];
+    const value = values[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    await callback();
+  } finally {
+    for (const key of Object.keys(values)) {
+      const value = previous[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }

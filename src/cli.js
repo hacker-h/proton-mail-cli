@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.js";
 
 /**
  * @typedef {{ write(chunk: string): unknown }} WritableLike
@@ -9,10 +10,11 @@ import fs from "node:fs";
  * @typedef {(...args: unknown[]) => unknown | Promise<unknown>} CliHandler
  * @typedef {{ list?: CliHandler, latest?: CliHandler, read?: CliHandler }} CliMailClient
  * @typedef {{ get?: CliHandler }} CliOtpClient
- * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient }} CliClients
+ * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
+ * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient, doctor?: CliDoctorClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
- * @typedef {{ timeout: number | null, config: string | null, session: string | null, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
@@ -227,6 +229,16 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     return { command, data, human: renderOtp(data) };
   }
 
+  if (command === "doctor:config") {
+    const data = doctorConfig(global);
+    return { command, data, human: renderDoctor(data) };
+  }
+
+  if (command === "doctor:session") {
+    const data = await doctorSession(global, clients);
+    return { command, data, human: renderDoctor(data) };
+  }
+
   throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_COMMAND", `Unknown command: ${formatCommand(command, args)}`, {
     command,
     args,
@@ -257,7 +269,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
@@ -339,6 +351,12 @@ function normalizeCommand(positionals) {
   if (first === "read") return { command: "mail:read", args: positionals.slice(1) };
   if (first === "otp") return { command: "otp", args: positionals.slice(1) };
 
+  if (first === "doctor") {
+    if (second === "config") return { command: "doctor:config", args: rest };
+    if (second === "session" || second === "auth") return { command: "doctor:session", args: rest };
+    return { command: `doctor:${second || ""}`, args: rest };
+  }
+
   if (first === "mail") {
     if (!second || ["ls", "list", "inbox"].includes(second)) return { command: "mail:list", args: rest };
     if (second === "latest") return { command: "mail:latest", args: rest };
@@ -372,10 +390,11 @@ async function callInjected(handler, args, commandLabel) {
  * @returns {ClientOptions}
  */
 function clientOptions(global) {
+  const resolved = resolveCliConfig({ global });
   return {
-    timeout: global.timeout,
-    config: global.config,
-    session: global.session,
+    timeout: resolved.values.timeout,
+    config: resolved.configFile.path,
+    session: resolved.values.sessionFile,
     quiet: global.quiet,
     verbose: global.verbose,
     format: global.format,
@@ -427,15 +446,15 @@ function normalizeError(error) {
     return {
       exitCode: error.exitCode,
       code: error.code,
-      message: error.message,
-      details: error.details,
+      message: String(redact(error.message)),
+      details: redact(error.details),
     };
   }
 
   return {
     exitCode: CLI_EXIT.RUNTIME,
     code: "RUNTIME_ERROR",
-    message: error instanceof Error && error.message ? error.message : "Unexpected CLI failure",
+    message: String(redact(error instanceof Error && error.message ? error.message : "Unexpected CLI failure")),
   };
 }
 
@@ -476,6 +495,13 @@ function renderOtp(data) {
   const object = toRecord(data);
   if (object.code) return `${object.code}\n`;
   return renderObject(data);
+}
+
+/** @param {unknown} data */
+function renderDoctor(data) {
+  const object = toRecord(data);
+  const status = object.status || "unknown";
+  return `${status}\n`;
 }
 
 /**
