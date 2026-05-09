@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { resolveDebugConfig } from "./debug-config.js";
+import { ApiError, SessionExpiredError } from "./errors.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
@@ -31,13 +32,21 @@ const PRIVATE_FILE_MODE = 0o600;
  * @typedef {{ success: false, error: string, [key: string]: unknown }} ErrorResult
  * @typedef {{ success: true, loginMethod?: string, sessionValid?: boolean, sessionFileExists?: boolean }} LoginSuccess
  * @typedef {ErrorResult | LoginSuccess} LoginResult
+ * @typedef {LoginResult | (LoginResult & Partial<SessionHandles>)} LoginAndSaveSessionResult
  * @typedef {{ success: true, subject: string, bodyText: string }} ExtractedMessage
  * @typedef {ErrorResult | ExtractedMessage} ExtractMessageResult
  * @typedef {{ browser?: Browser | null, context?: BrowserContext | null, page?: Page | null, debug?: { cdpEndpoint: string } }} SessionHandles
  * @typedef {{ browser: Browser | null, context: BrowserContext, page: Page, debug?: { cdpEndpoint: string }, success: true }} SessionSuccess
  * @typedef {ErrorResult | SessionSuccess} SessionResult
+ * @typedef {{ success: true, sessionValid: true, inboxMessageCount: number, messages: MessagePreview[] }} InboxMessagesSuccess
+ * @typedef {ErrorResult | (ErrorResult & Partial<SessionHandles>) | InboxMessagesSuccess} InboxMessagesResult
  * @typedef {{ success: true, sessionValid: true, message: { index: number, preview: string, subject: string, bodyText: string } }} LatestMessageSuccess
  * @typedef {ErrorResult | LatestMessageSuccess} LatestMessageResult
+ * @typedef {{ success: true, sessionValid: true, code: string, message: LatestMessageSuccess["message"] }} OtpSuccess
+ * @typedef {ErrorResult | OtpSuccess} OtpResult
+ * @typedef {{ loaded: boolean, file: string }} RuntimeEnvResult
+ * @typedef {{ exists: boolean, storageState: StorageState | null, error: string | null }} StorageStateLoadResult
+ * @typedef {{ state: string, url: string }} NavigationState
  * @typedef {{
  *   headless?: boolean,
  *   timeoutSeconds?: number,
@@ -86,6 +95,7 @@ export class ProtonMailBrowserClient {
     return this.#options.sessionFile;
   }
 
+  /** @returns {RuntimeEnvResult} */
   loadRuntimeEnv() {
     if (this.#envLoaded) {
       return { loaded: false, file: "" };
@@ -109,7 +119,10 @@ export class ProtonMailBrowserClient {
     return { loaded: false, file: "" };
   }
 
-  /** @param {BrowserActionOptions} [options] */
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<LoginAndSaveSessionResult>}
+   */
   async loginAndSaveSession(options = {}) {
     this.loadRuntimeEnv();
     const mailUrl = resolveMailUrl(options);
@@ -140,12 +153,12 @@ export class ProtonMailBrowserClient {
         await dismissModals(page);
         await saveSession(context, this.#options.sessionFile);
         clearCooldown(this.#options.sessionFile);
-        return resultWithSession({
+        return resultWithSession(/** @type {LoginSuccess} */ ({
           success: true,
           loginMethod: "session",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        }, { browser, context, page, debug });
+        }), { browser, context, page, debug });
       }
 
       if (!credentials.ready) {
@@ -170,12 +183,12 @@ export class ProtonMailBrowserClient {
             { browser, context, page, debug }
           );
         }
-        return resultWithSession({
+        return resultWithSession(/** @type {LoginSuccess} */ ({
           success: true,
           loginMethod: automatic.loginMethod || "automatic",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        }, { browser, context, page, debug });
+        }), { browser, context, page, debug });
       }
 
       if (!settings.manualFallback || settings.headless || automatic.manualRequired === false) {
@@ -207,7 +220,10 @@ export class ProtonMailBrowserClient {
     }
   }
 
-  /** @param {BrowserActionOptions} [options] */
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<InboxMessagesResult>}
+   */
   async getInboxMessages(options = {}) {
     this.loadRuntimeEnv();
     const session = await this.#ensureLoggedIn(options);
@@ -275,7 +291,10 @@ export class ProtonMailBrowserClient {
     }
   }
 
-  /** @param {BrowserActionOptions} [options] */
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<OtpResult>}
+   */
   async extractOtpCode(options = {}) {
     const matchText = options.matchText || /openai|noreply@openai\.com/i;
     const result = await this.getLatestMessage({ ...options, matchText });
@@ -298,7 +317,10 @@ export class ProtonMailBrowserClient {
     };
   }
 
-  /** @param {BrowserActionOptions} [options] */
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<LoginAndSaveSessionResult>}
+   */
   async debugLogin(options = {}) {
     const client = new ProtonMailBrowserClient({
       sessionFile: this.#options.sessionFile,
@@ -339,6 +361,19 @@ export class ProtonMailBrowserClient {
       let navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state === "inbox") {
         return successfulSessionResult({ browser, context, page, debug });
+      }
+
+      if (isExpiredSavedSession(storage, navigation)) {
+        const expired = sessionExpiredResult({
+          sessionFile: this.#options.sessionFile,
+          url: navigation.url,
+        });
+        if (keepOpenOnError) {
+          return resultWithSession(expired, { browser, context, page, debug });
+        }
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
+        return expired;
       }
 
       const cooldown = getCooldownState(this.#options.sessionFile);
@@ -601,7 +636,10 @@ function loadEnvFile(filePath) {
   return true;
 }
 
-/** @param {string} sessionFile */
+/**
+ * @param {string} sessionFile
+ * @returns {StorageStateLoadResult}
+ */
 function loadStorageState(sessionFile) {
   if (!fs.existsSync(sessionFile)) {
     return { exists: false, storageState: null, error: null };
@@ -619,6 +657,14 @@ function loadStorageState(sessionFile) {
       error: error instanceof Error ? error.message : "Session file unreadable",
     };
   }
+}
+
+/**
+ * @param {StorageStateLoadResult} storage
+ * @param {NavigationState} navigation
+ */
+function isExpiredSavedSession(storage, navigation) {
+  return Boolean(storage?.exists && storage.storageState && navigation?.state === "login");
 }
 
 /** @param {string} sessionFile */
@@ -663,12 +709,42 @@ function clearCooldown(sessionFile) {
 }
 
 /**
- * @param {string} error
+ * @param {string | Error} error
  * @param {Record<string, unknown>} [extra]
  * @returns {ErrorResult}
  */
 function resultWithError(error, extra = {}) {
+  if (error instanceof ApiError) {
+    return {
+      success: false,
+      error: error.message,
+      errorName: error.name,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      ...extra,
+    };
+  }
+  if (error instanceof Error) {
+    return {
+      success: false,
+      error: error.message,
+      errorName: error.name,
+      ...extra,
+    };
+  }
   return { success: false, error, ...extra };
+}
+
+/**
+ * @param {Record<string, unknown>} [details]
+ * @returns {ErrorResult}
+ */
+function sessionExpiredResult(details = {}) {
+  return resultWithError(new SessionExpiredError("Saved Proton Mail session expired; refresh the session file", details), {
+    sessionExpired: true,
+    sessionValid: false,
+  });
 }
 
 /**
@@ -1308,6 +1384,7 @@ export const __internal = {
   extractFirstOtpCode,
   findMatchingMessage,
   hasAuthChallengeText,
+  isExpiredSavedSession,
   debugLog,
   isDebugLoggingEnabled,
   MAIL_ALL_URL,
