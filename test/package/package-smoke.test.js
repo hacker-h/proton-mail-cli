@@ -43,6 +43,15 @@ describe("installed pm package smoke", () => {
     assert.match(version.stdout, /^pm \d+\.\d+\.\d+/u);
     assert.equal(version.stderr, "");
 
+    const importCheck = run(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      "import { ProtonMailClient, ProtonMailBrowserClient } from 'proton-mail-cli'; console.log(`${typeof ProtonMailClient}:${typeof ProtonMailBrowserClient}`);",
+    ], { cwd: appDir, env });
+    assert.equal(importCheck.status, 0, importCheck.stderr);
+    assert.equal(importCheck.stdout, "function:function\n");
+    assert.equal(importCheck.stderr, "");
+
     const failure = run(pm, ["ls", "--json"], { cwd: appDir, env });
     assert.equal(failure.status, 2, failure.stderr);
     assert.equal(failure.stdout, "");
