@@ -462,6 +462,7 @@ function ensureDir(dirPath) {
 
 function ensurePrivateDir(dirPath) {
   ensureDir(dirPath);
+  // Recursive mkdir mode does not reliably harden existing/intermediate directories.
   try {
     fs.chmodSync(dirPath, 0o700);
   } catch {}
@@ -535,10 +536,7 @@ function getCooldownState(sessionFile) {
 function writeCooldown(sessionFile, reason) {
   const filePath = cooldownFile(sessionFile);
   ensurePrivateDir(path.dirname(filePath));
-  fs.writeFileSync(filePath, `${JSON.stringify({ lastFailedAt: new Date().toISOString(), reason }, null, 2)}\n`, "utf8");
-  try {
-    fs.chmodSync(filePath, 0o600);
-  } catch {}
+  fs.writeFileSync(filePath, `${JSON.stringify({ lastFailedAt: new Date().toISOString(), reason }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function clearCooldown(sessionFile) {
@@ -624,10 +622,8 @@ async function getVisiblePageText(page) {
 
 async function saveSession(context, sessionFile) {
   ensurePrivateDir(path.dirname(sessionFile));
-  await context.storageState({ path: sessionFile });
-  try {
-    fs.chmodSync(sessionFile, 0o600);
-  } catch {}
+  const storageState = await context.storageState();
+  fs.writeFileSync(sessionFile, `${JSON.stringify(storageState, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function resolveMailUrl(options = {}) {
@@ -1035,4 +1031,6 @@ export const __internal = {
   MAIL_ALL_URL,
   matchOpenAiEmail,
   resolveMailUrl,
+  saveSession,
+  writeCooldown,
 };
