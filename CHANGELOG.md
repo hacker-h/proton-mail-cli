@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.0.0...v1.0.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **browser:** signal expired saved sessions ([fe7f02e](https://github.com/hacker-h/proton-mail-cli/commit/fe7f02eed9b674ef2e880ddff4d2399dc9732f92))
+
 # 1.0.0 (2026-05-09)
 
 
