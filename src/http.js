@@ -292,14 +292,14 @@ export class ProtonHttp {
         if (error instanceof ApiError) throw error;
         if (isFinal) {
           throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend", {
-            message: error?.message,
+            message: error instanceof Error ? error.message : undefined,
           });
         }
         if (canRetry) {
           await this.#sleep(backoffMs(attempt));
         } else {
           throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend", {
-            message: error?.message,
+            message: error instanceof Error ? error.message : undefined,
           });
         }
       }
@@ -432,7 +432,10 @@ function getSetCookieHeaders(headers) {
   return combined ? [combined] : [];
 }
 
-/** @param {Response} response */
+/**
+ * @param {Response} response
+ * @returns {Promise<ProtonApiResponse | null>}
+ */
 async function parsePayload(response) {
   if (response.status === 204) return null;
   const text = await response.text();
@@ -471,11 +474,19 @@ function rateLimitBackoffMs(attempt, baseDelayMs, maxDelayMs, jitterRatio) {
   return Math.round(base + base * jitterRatio * pseudoRandom01(attempt));
 }
 
+/**
+ * @param {Response} response
+ * @returns {boolean}
+ */
 function isJsonResponse(response) {
   const contentType = response?.headers?.get?.("content-type") || "";
   return contentType.includes("application/json") || contentType.includes("application/vnd.protonmail.v1+json");
 }
 
+/**
+ * @param {Response} response
+ * @returns {Promise<ProtonApiResponse | null>}
+ */
 async function safeParsePayload(response) {
   try {
     return await parsePayload(response);
@@ -484,11 +495,19 @@ async function safeParsePayload(response) {
   }
 }
 
+/**
+ * @param {string} method
+ * @returns {boolean}
+ */
 function isRetryableMethod(method) {
   const upper = String(method || "").toUpperCase();
   return upper === "GET" || upper === "HEAD";
 }
 
+/**
+ * @param {number} attempt
+ * @returns {number}
+ */
 function pseudoRandom01(attempt) {
   const value = (Math.imul(attempt, 1103515245) + 12345) >>> 0;
   return value / 0x1_0000_0000;
