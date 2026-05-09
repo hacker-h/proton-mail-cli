@@ -1,3 +1,13 @@
+## [1.1.2](https://github.com/hacker-h/proton-mail-cli/compare/v1.1.1...v1.1.2) (2026-05-09)
+
+
+### Bug Fixes
+
+* **browser:** log temp cleanup failures ([a8720ee](https://github.com/hacker-h/proton-mail-cli/commit/a8720eec1609bc1bf728bf93c2b79ff8e8bccbc8))
+* **cli:** type argument count helper ([0e1cd9e](https://github.com/hacker-h/proton-mail-cli/commit/0e1cd9e23d7962adf898a4d88729fc1105f2c0d8))
+* harden browser observability ([2a74a94](https://github.com/hacker-h/proton-mail-cli/commit/2a74a94cffc2adf5cb61b407daa65bd25dccfe56))
+* repair browser checkjs types ([90e3dc7](https://github.com/hacker-h/proton-mail-cli/commit/90e3dc739c1749cc7b222e99b7a6eab37902c16b))
+
 ## [1.1.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.1.0...v1.1.1) (2026-05-09)
 
 
