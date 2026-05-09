@@ -1,3 +1,11 @@
+## [1.2.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.2.0...v1.2.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **http:** harden requestRaw retry and errors ([569b9bb](https://github.com/hacker-h/proton-mail-cli/commit/569b9bbadf18e0f4d27367217198c5866253b3a9))
+* **http:** repair requestRaw checkjs types ([7aa6cb0](https://github.com/hacker-h/proton-mail-cli/commit/7aa6cb00e315ac3718c37e152126b77dce73b2c4)), closes [#45](https://github.com/hacker-h/proton-mail-cli/issues/45)
+
 # [1.2.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.1.2...v1.2.0) (2026-05-09)
 
 
