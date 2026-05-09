@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.0.1...v1.1.0) (2026-05-09)
+
+
+### Features
+
+* add pm CLI runner contract ([6d6df4d](https://github.com/hacker-h/proton-mail-cli/commit/6d6df4dad2ff932d01720a16a756c4ee1461dd4a))
+
 ## [1.0.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.0.0...v1.0.1) (2026-05-09)
 
 
