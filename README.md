@@ -69,6 +69,11 @@ import { ProtonMailClient, Labels } from "protonmail-api-client";
 const client = new ProtonMailClient({
   sessionStore: mySessionStore,
   baseUrl: "https://mail.proton.me/api",
+  rateLimit: {
+    maxRetries: 2,
+    baseDelayMs: 200,
+    maxDelayMs: 3000,
+  },
 });
 
 const { messages, total } = await client.getMessageMetadata({ LabelID: Labels.INBOX });
@@ -79,6 +84,8 @@ const labels = await client.getLabels();
 const newLabel = await client.createLabel("Important", "#ff0000");
 const calendars = await client.api("GET", "/calendar/v1");
 ```
+
+HTTP 429 responses respect `Retry-After` when Proton sends it. Without that header, retries use exponential back-off with jitter until the `rateLimit.maxRetries` budget is exhausted, then throw `RateLimitError` with `retryAfter` and `retryAfterMs` fields.
 
 ## Session Store Interface
 

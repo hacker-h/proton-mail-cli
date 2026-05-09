@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { ApiError } from "./errors.js";
+import { ApiError, RateLimitError } from "./errors.js";
 import {
   DEFAULT_API_URL,
   DEFAULT_APP_VERSION,
@@ -14,8 +14,13 @@ export class ProtonHttp {
   #fetchImpl;
   #timeoutMs;
   #maxRetries;
+  #rateLimitMaxRetries;
+  #rateLimitBaseDelayMs;
+  #rateLimitMaxDelayMs;
+  #rateLimitJitterRatio;
   #sessionStore;
   #debugHttp;
+  #sleep;
 
   constructor(options) {
     this.#baseUrl = new URL(options.baseUrl || DEFAULT_API_URL);
@@ -24,8 +29,14 @@ export class ProtonHttp {
     this.#fetchImpl = options.fetchImpl || fetch;
     this.#timeoutMs = options.timeoutMs || 30000;
     this.#maxRetries = options.maxRetries ?? 2;
+    const rateLimit = options.rateLimit || {};
+    this.#rateLimitMaxRetries = rateLimit.maxRetries ?? options.rateLimitMaxRetries ?? this.#maxRetries;
+    this.#rateLimitBaseDelayMs = rateLimit.baseDelayMs ?? options.rateLimitBaseDelayMs ?? 200;
+    this.#rateLimitMaxDelayMs = rateLimit.maxDelayMs ?? options.rateLimitMaxDelayMs ?? 3000;
+    this.#rateLimitJitterRatio = rateLimit.jitterRatio ?? options.rateLimitJitterRatio ?? 0.2;
     this.#sessionStore = options.sessionStore;
     this.#debugHttp = Boolean(options.debugHttp);
+    this.#sleep = options.sleep || delay;
   }
 
   async request(method, pathname, options = {}) {
@@ -54,6 +65,7 @@ export class ProtonHttp {
     const body = options.body !== undefined ? JSON.stringify(options.body) : undefined;
     let authRefreshAttempted = false;
     let attempt = 0;
+    let rateLimitAttempts = 0;
 
     while (attempt <= this.#maxRetries) {
       const isFinal = attempt === this.#maxRetries;
@@ -91,8 +103,18 @@ export class ProtonHttp {
           throw new ApiError(404, "NOT_FOUND", "Resource not found");
         }
 
-        if ((response.status === 429 || response.status >= 500) && !isFinal) {
-          await delay(backoffMs(attempt));
+        if (response.status === 429) {
+          if (rateLimitAttempts >= this.#rateLimitMaxRetries) {
+            throw this.#rateLimitError(response, payload);
+          }
+          rateLimitAttempts++;
+          attempt--;
+          await this.#sleep(this.#rateLimitDelayMs(response.headers, rateLimitAttempts));
+          continue;
+        }
+
+        if (response.status >= 500 && !isFinal) {
+          await this.#sleep(backoffMs(attempt));
           continue;
         }
 
@@ -114,7 +136,7 @@ export class ProtonHttp {
             message: error?.message,
           });
         }
-        await delay(backoffMs(attempt));
+        await this.#sleep(backoffMs(attempt));
       }
     }
 
@@ -132,22 +154,35 @@ export class ProtonHttp {
       "x-pm-uid": uid,
     };
 
-    const cookieHeader = await this.#sessionStore.getCookieHeader(url.toString());
-    if (!cookieHeader) {
-      throw new ApiError(401, "AUTH_EXPIRED", "No valid session cookies available");
+    let rateLimitAttempts = 0;
+
+    while (true) {
+      const cookieHeader = await this.#sessionStore.getCookieHeader(url.toString());
+      if (!cookieHeader) {
+        throw new ApiError(401, "AUTH_EXPIRED", "No valid session cookies available");
+      }
+
+      const response = await this.#fetchImpl(url, {
+        method,
+        headers: { ...headers, Cookie: cookieHeader },
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+
+      if (response.status === 429) {
+        if (rateLimitAttempts >= this.#rateLimitMaxRetries) {
+          throw this.#rateLimitError(response);
+        }
+        rateLimitAttempts++;
+        await this.#sleep(this.#rateLimitDelayMs(response.headers, rateLimitAttempts));
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new ApiError(response.status, "UPSTREAM_ERROR", `Attachment fetch failed: ${response.status}`);
+      }
+
+      return response;
     }
-
-    const response = await this.#fetchImpl(url, {
-      method,
-      headers: { ...headers, Cookie: cookieHeader },
-      signal: AbortSignal.timeout(this.#timeoutMs),
-    });
-
-    if (!response.ok) {
-      throw new ApiError(response.status, "UPSTREAM_ERROR", `Attachment fetch failed: ${response.status}`);
-    }
-
-    return response;
   }
 
   async #resolveUID() {
@@ -227,6 +262,22 @@ export class ProtonHttp {
     const suffix = details ? ` ${JSON.stringify(details)}` : "";
     console.log(`[protonmail-http] ${message}${suffix}`);
   }
+
+  #rateLimitDelayMs(headers, attempt) {
+    const retryAfterMs = parseRetryAfterMs(headers);
+    if (retryAfterMs !== null) return retryAfterMs;
+    return rateLimitBackoffMs(attempt, this.#rateLimitBaseDelayMs, this.#rateLimitMaxDelayMs, this.#rateLimitJitterRatio);
+  }
+
+  #rateLimitError(response, payload) {
+    const retryAfterMs = parseRetryAfterMs(response.headers);
+    const retryAfter = retryAfterMs === null ? null : retryAfterMs / 1000;
+    return new RateLimitError("Proton rate limit retry budget exhausted", {
+      retryAfter,
+      retryAfterMs,
+      payload,
+    });
+  }
 }
 
 function getSetCookieHeaders(headers) {
@@ -252,4 +303,19 @@ async function parsePayload(response) {
 
 function backoffMs(attempt) {
   return Math.min(3000, 200 * 2 ** attempt);
+}
+
+function parseRetryAfterMs(headers) {
+  const value = headers?.get?.("retry-after");
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(value);
+  if (Number.isNaN(dateMs)) return null;
+  return Math.max(0, dateMs - Date.now());
+}
+
+function rateLimitBackoffMs(attempt, baseDelayMs, maxDelayMs, jitterRatio) {
+  const base = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+  return Math.round(base + base * jitterRatio * Math.random());
 }
