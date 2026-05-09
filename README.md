@@ -158,9 +158,11 @@ This opens a headful Chromium browser with CDP enabled, keeps it open on failure
 
 ## CI/CD
 
-Pull requests run offline gates for every contributor. Same-repository pull requests, including Dependabot branches, also run live Proton login regression with the cached test-account session. Fork pull requests stay offline-only so repository secrets are never exposed to untrusted code.
+Required pull-request gates are offline only: install, typecheck, unit tests, and package smoke. Proton-facing checks are isolated in a separate workflow that requires repository secrets and can report Proton-side drift such as CAPTCHA, selector changes, or backend auth changes without becoming the deterministic merge gate.
 
-See [docs/ci.md](docs/ci.md) for the full gate contract, local commands, live-test secrets, and drift policy.
+Releases are automated by semantic-release on pushes to `main` after the offline gate passes. Because the package is currently private, releases publish GitHub Releases with attached npm tarballs instead of publishing to the npm registry.
+
+See [docs/ci.md](docs/ci.md) for the full gate contract, local commands, live-test secrets, and drift policy. See [docs/RELEASING.md](docs/RELEASING.md) for release behavior and the npm-publishing checklist.
 
 ## Related
 

@@ -1,0 +1,40 @@
+# Releasing
+
+Releases are automated by semantic-release on pushes to `main` through `.github/workflows/release.yml`.
+
+## Release Inputs
+
+semantic-release reads Conventional Commits from git history and publishes a GitHub Release when a releasable commit is present:
+
+- `fix:` creates a patch release.
+- `feat:` creates a minor release.
+- breaking changes create a major release.
+
+The release job runs `pnpm ci:offline` before publishing, so release eligibility matches the deterministic pull-request gate.
+
+## Changelog
+
+semantic-release writes release notes to `CHANGELOG.md` during the release and commits the changelog plus the release `package.json` version back to `main` with a `[skip ci]` release commit.
+
+## First Release Baseline
+
+This repository currently has no release tags. The first semantic-release run on `main` will calculate its release from the existing Conventional Commit history. If maintainers need to preserve the current `package.json` version line as the first baseline, create the intended baseline tag before merging release automation.
+
+## Package Artifact
+
+`package.json` is currently marked `private`, so releases do not publish to the npm registry. The release workflow instead runs `@semantic-release/npm` with `npmPublish: false`, creates a packed `.tgz` artifact, and attaches that tarball to the GitHub Release.
+
+semantic-release updates `package.json` in the release job workspace before packing. The release commit stores the changelog and package version in git, while the git tag and GitHub Release remain the source of truth for the published artifact.
+
+If this package should be published to npm later:
+
+1. Remove `"private": true` from `package.json`.
+2. Add the intended npm package metadata and `publishConfig`.
+3. Configure npm trusted publishing for `.github/workflows/release.yml`, or add an `NPM_TOKEN` fallback.
+4. Change `release.config.mjs` to publish with `@semantic-release/npm`.
+
+## Secrets And Permissions
+
+Current GitHub-only releases require no repository secrets. The workflow uses the built-in `GITHUB_TOKEN` with `contents: write`, `issues: write`, and `pull-requests: write` so semantic-release can create releases and comment on released issues or pull requests.
+
+Live Proton regression secrets are intentionally separate from release automation. Do not make `pnpm test:live` a release prerequisite; Proton-side drift should not block deterministic package releases.
