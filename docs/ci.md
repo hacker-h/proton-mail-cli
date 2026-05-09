@@ -17,6 +17,7 @@ pnpm ci:offline
 
 - `pnpm typecheck`
 - `pnpm test:unit`
+- `pnpm test:package`
 - `npm pack --dry-run`
 
 These gates must not require Proton credentials, a browser login, Proton Bridge, or network access beyond dependency installation.
