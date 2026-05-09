@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { resolveDebugConfig } from "./debug-config.js";
+import { SessionExpiredError } from "./errors.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
@@ -285,6 +286,19 @@ export class ProtonMailBrowserClient {
         return resultWithSession({ success: true }, { browser, context, page, debug });
       }
 
+      if (isExpiredSavedSession(storage, navigation)) {
+        const expired = sessionExpiredResult({
+          sessionFile: this.#options.sessionFile,
+          url: navigation.url,
+        });
+        if (keepOpenOnError) {
+          return resultWithSession(expired, { browser, context, page, debug });
+        }
+        await context.close().catch(ignoreWithDebug("Failed to close browser context"));
+        await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
+        return expired;
+      }
+
       const cooldown = getCooldownState(this.#options.sessionFile);
       if (cooldown.active) {
         if (keepOpenOnError) {
@@ -533,6 +547,10 @@ function loadStorageState(sessionFile) {
   }
 }
 
+function isExpiredSavedSession(storage, navigation) {
+  return Boolean(storage?.exists && storage.storageState && navigation?.state === "login");
+}
+
 function cooldownFile(sessionFile) {
   return path.join(path.dirname(sessionFile), "protonmail-login-cooldown.json");
 }
@@ -568,7 +586,25 @@ function clearCooldown(sessionFile) {
 }
 
 function resultWithError(error, extra = {}) {
+  if (error instanceof Error) {
+    return {
+      success: false,
+      error: error.message,
+      errorName: error.name,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      ...extra,
+    };
+  }
   return { success: false, error, ...extra };
+}
+
+function sessionExpiredResult(details = {}) {
+  return resultWithError(new SessionExpiredError("Saved Proton Mail session expired; refresh the session file", details), {
+    sessionExpired: true,
+    sessionValid: false,
+  });
 }
 
 function resultWithSession(result, { browser, context, page, debug }) {
@@ -1091,6 +1127,7 @@ export const __internal = {
   extractFirstOtpCode,
   findMatchingMessage,
   hasAuthChallengeText,
+  isExpiredSavedSession,
   debugLog,
   isDebugLoggingEnabled,
   MAIL_ALL_URL,

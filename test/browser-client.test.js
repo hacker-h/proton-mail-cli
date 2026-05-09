@@ -4,8 +4,68 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ProtonMailBrowserClient, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "../src/index.js";
+import { ProtonMailBrowserClient, SessionExpiredError, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "../src/index.js";
 import { __internal } from "../src/browser-client.js";
+
+function hiddenLocator() {
+  return {
+    first: () => hiddenLocator(),
+    isVisible: async () => false,
+    innerText: async () => "",
+    waitFor: async () => {
+      throw new Error("not visible");
+    },
+  };
+}
+
+function visibleLocator() {
+  return {
+    first: () => visibleLocator(),
+    isVisible: async () => true,
+    waitFor: async () => {},
+  };
+}
+
+function browserFactoryForExpiredSession() {
+  const calls = { contextClosed: 0, browserClosed: 0, storageState: null };
+  const page = {
+    goto: async (url) => {
+      page.currentUrl = "https://account.proton.me/login";
+      page.lastGoto = url;
+    },
+    url: () => page.currentUrl,
+    frames: () => [],
+    locator: () => hiddenLocator(),
+    getByRole: (role, options = {}) => {
+      if (role === "textbox" && /email|e-mail|benutzername/i.test(String(options.name))) {
+        return visibleLocator();
+      }
+      return hiddenLocator();
+    },
+  };
+  page.currentUrl = "about:blank";
+
+  const browser = {
+    newContext: async (options) => {
+      calls.storageState = options.storageState;
+      return {
+        addInitScript: async () => {},
+        newPage: async () => page,
+        close: async () => {
+          calls.contextClosed += 1;
+        },
+      };
+    },
+    close: async () => {
+      calls.browserClosed += 1;
+    },
+  };
+
+  return {
+    calls,
+    launch: async () => browser,
+  };
+}
 
 describe("ProtonMailBrowserClient exports", () => {
   it("exports a constructible browser client", () => {
@@ -32,6 +92,13 @@ describe("ProtonMailBrowserClient exports", () => {
     assert.ok(defaultSessionFile().endsWith("data/protonmail-auth.json"));
   });
 
+  it("exports a named session expiry error type", () => {
+    const error = new SessionExpiredError();
+    assert.equal(error.name, "SessionExpiredError");
+    assert.equal(error.status, 401);
+    assert.equal(error.code, "SESSION_EXPIRED");
+  });
+
   it("does not classify generic challenge wording as CAPTCHA", () => {
     assert.equal(__internal.hasAuthChallengeText("Challenge yourself with encrypted email"), false);
     assert.equal(__internal.hasAuthChallengeText("A secure login protects your account"), false);
@@ -40,6 +107,40 @@ describe("ProtonMailBrowserClient exports", () => {
   it("classifies visible human-verification wording as an auth challenge", () => {
     assert.equal(__internal.hasAuthChallengeText("Please verify that you are human"), true);
     assert.equal(__internal.hasAuthChallengeText("Complete this security check"), true);
+  });
+
+  it("signals saved-session expiry without a live Proton session", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-browser-client-expired-"));
+    const sessionFile = path.join(tempDir, "session.json");
+    const storageState = { cookies: [{ name: "AUTH-test", value: "stale", domain: ".proton.me", path: "/" }], origins: [] };
+    const browserFactory = browserFactoryForExpiredSession();
+
+    try {
+      fs.writeFileSync(sessionFile, JSON.stringify(storageState), "utf8");
+      const client = new ProtonMailBrowserClient({
+        headless: true,
+        sessionFile,
+        browserFactory,
+        usernameEnv: "PROTONMAIL_BROWSER_TEST_MISSING_USERNAME",
+        passwordEnv: "PROTONMAIL_BROWSER_TEST_MISSING_PASSWORD",
+      });
+
+      const result = await client.getInboxMessages();
+
+      assert.equal(result.success, false);
+      assert.equal(result.sessionExpired, true);
+      assert.equal(result.sessionValid, false);
+      assert.equal(result.errorName, "SessionExpiredError");
+      assert.equal(result.code, "SESSION_EXPIRED");
+      assert.equal(result.status, 401);
+      assert.equal(result.details.sessionFile, sessionFile);
+      assert.match(result.details.url, /account\.proton\.me\/login/u);
+      assert.deepEqual(browserFactory.calls.storageState, storageState);
+      assert.equal(browserFactory.calls.contextClosed, 1);
+      assert.equal(browserFactory.calls.browserClosed, 1);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("emits debug logs only when Proton debug mode is enabled", () => {

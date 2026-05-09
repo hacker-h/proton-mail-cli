@@ -1,7 +1,7 @@
 export { ProtonMailClient } from "./client.js";
 export { ProtonMailBrowserClient, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "./browser-client.js";
 export { ProtonHttp } from "./http.js";
-export { ApiError, RateLimitError } from "./errors.js";
+export { ApiError, RateLimitError, SessionExpiredError } from "./errors.js";
 export {
   DEFAULT_API_URL,
   DEFAULT_APP_VERSION,
