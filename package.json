@@ -5,11 +5,12 @@
   "packageManager": "pnpm@9.15.9",
   "type": "module",
   "files": [
+    "examples/",
     "src/",
     "scripts/",
     "README.md",
     "DEBUG.md",
-    "docs/ci.md"
+    "docs/"
   ],
   "exports": {
     ".": "./src/index.js"
