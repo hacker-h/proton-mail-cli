@@ -81,7 +81,7 @@ The package also exports `SessionExpiredError` for callers that normalize browse
 Use a two-step flow for long-lived bots:
 
 ```js
-import { ProtonMailBrowserClient, SessionExpiredError } from "protonmail-api-client";
+import { ProtonMailBrowserClient, SessionExpiredError } from "proton-mail-cli";
 
 const client = new ProtonMailBrowserClient({
   headless: true,
@@ -154,7 +154,7 @@ Do not log or commit this object. Cookies and refresh payloads are secret-bearin
 
 ```js
 import { MemorySessionStore } from "./examples/memory-session-store.js";
-import { ProtonMailClient } from "protonmail-api-client";
+import { ProtonMailClient } from "proton-mail-cli";
 
 const sessionStore = new MemorySessionStore({
   uid: "proton-uid",

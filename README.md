@@ -1,6 +1,6 @@
-# protonmail-api-client
+# proton-mail-cli
 
-Reusable Proton Mail client package with two layers:
+Automation-friendly Proton Mail CLI and reusable client package with two layers:
 
 1. `ProtonMailClient` for REST/API access when you already have a valid cookie session store
 2. `ProtonMailBrowserClient` for Playwright-based login, saved-session reuse, plaintext inbox/message extraction, and OTP retrieval
@@ -9,7 +9,7 @@ The browser client is the canonical dependency surface when other local projects
 
 ## CLI Usage
 
-This package installs a `pm` binary for automation-friendly Proton Mail commands. Issue #1 defines the command contract only: help, version, global flags, aliases, dispatch, output envelopes, and stable exit codes. The mail commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login.
+This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. Issue #1 defines the command contract only: help, version, global flags, aliases, dispatch, output envelopes, and stable exit codes. The mail commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login.
 
 Local workspace usage:
 
@@ -96,7 +96,7 @@ pm doctor session --json
 ## Browser Client Usage
 
 ```js
-import { ProtonMailBrowserClient } from "protonmail-api-client";
+import { ProtonMailBrowserClient } from "proton-mail-cli";
 
 const client = new ProtonMailBrowserClient({
   headless: true,
@@ -140,7 +140,7 @@ if (otp.success) {
 
 ### Browser Client Runtime Notes
 
-- `protonmail-api-client` imports `playwright-core` at runtime. `playwright-core` provides the API but does not install browser binaries.
+- `proton-mail-cli` imports `playwright-core` at runtime. `playwright-core` provides the API but does not install browser binaries.
 - In this repo, local development uses the `playwright` dev dependency; run `pnpm exec playwright install chromium` if Chromium is missing.
 - Package consumers should either install a compatible Chromium and pass `debug.executablePath` / `PROTONMAIL_DEBUG_CHROMIUM`, or depend on `playwright` and run its browser installer as part of setup.
 - Fresh automated logins can trigger Proton CAPTCHA or other human-verification challenges.
@@ -160,7 +160,7 @@ This repo handles secret-bearing browser session state (Playwright storage state
 ## REST/API Usage
 
 ```js
-import { ProtonMailClient, Labels } from "protonmail-api-client";
+import { ProtonMailClient, Labels } from "proton-mail-cli";
 
 const client = new ProtonMailClient({
   sessionStore: mySessionStore,

@@ -74,7 +74,7 @@
 * **debug:** add debugLogin convenience method ([97913fc](https://github.com/hacker-h/proton-mail-cli/commit/97913fcd65e3c1f72904c0ec75586c044cf5113d))
 * **debug:** debug-aware launch and ensureLoggedIn lifecycle ([cedac28](https://github.com/hacker-h/proton-mail-cli/commit/cedac287f87cc490f5e2b6b6d5d9d1b51a2b048d))
 * **debug:** suppress cooldown writes and keep browser open on error ([36f4924](https://github.com/hacker-h/proton-mail-cli/commit/36f49246e8a24d9457c8ef2e270a0202d181ffee))
-* initial protonmail-api-client with cookie-session auth ([638d902](https://github.com/hacker-h/proton-mail-cli/commit/638d902446b0f983e593005bcc51044ef191e383))
+* initial Proton Mail client package with cookie-session auth ([638d902](https://github.com/hacker-h/proton-mail-cli/commit/638d902446b0f983e593005bcc51044ef191e383))
 
 # Changelog
 
