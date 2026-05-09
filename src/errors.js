@@ -18,6 +18,10 @@ export class ApiError extends Error {
 }
 
 export class RateLimitError extends ApiError {
+  /**
+   * @param {string} message
+   * @param {{ retryAfter?: number | null, retryAfterMs?: number | null, [key: string]: unknown }} [details]
+   */
   constructor(message, details = {}) {
     super(429, "RATE_LIMITED", message, details);
     this.name = "RateLimitError";

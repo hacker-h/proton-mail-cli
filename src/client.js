@@ -1,10 +1,16 @@
 import { ProtonHttp } from "./http.js";
 import { MAX_PAGE_SIZE, MAX_BATCH_IDS } from "./constants.js";
 
+/**
+ * @typedef {import("./http.js").ProtonHttpOptions & { uid?: string | null }} ProtonMailClientOptions
+ * @typedef {Record<string, unknown>} ProtonFilter
+ */
+
 export class ProtonMailClient {
   #http;
   #uid;
 
+  /** @param {ProtonMailClientOptions} options */
   constructor(options) {
     this.#http = new ProtonHttp(options);
     this.#uid = options.uid || null;
@@ -25,6 +31,7 @@ export class ProtonMailClient {
     return payload?.KeySalts || [];
   }
 
+  /** @param {string} messageId */
   async getMessage(messageId) {
     const payload = await this.#http.request("GET", `/mail/v4/messages/${enc(messageId)}`, {
       uid: this.#uid,
@@ -32,6 +39,11 @@ export class ProtonMailClient {
     return payload?.Message;
   }
 
+  /**
+   * @param {ProtonFilter} [filter]
+   * @param {number} [page]
+   * @param {number} [pageSize]
+   */
   async getMessageMetadata(filter = {}, page = 0, pageSize = MAX_PAGE_SIZE) {
     // POST with body is the canonical way Proton lists messages (not GET)
     const body = {
@@ -53,7 +65,9 @@ export class ProtonMailClient {
     };
   }
 
+  /** @param {ProtonFilter} [filter] */
   async getAllMessageMetadata(filter = {}) {
+    /** @type {unknown[]} */
     const messages = [];
     let page = 0;
 
@@ -67,7 +81,12 @@ export class ProtonMailClient {
     return messages;
   }
 
+  /**
+   * @param {string} [afterId]
+   * @param {number} [limit]
+   */
   async getMessageIds(afterId = "", limit = 1000) {
+    /** @type {{ Limit: string, AfterID?: string }} */
     const query = { Limit: String(Math.min(limit, 1000)) };
     if (afterId) query.AfterID = afterId;
 
@@ -79,6 +98,7 @@ export class ProtonMailClient {
   }
 
   async getAllMessageIds() {
+    /** @type {string[]} */
     const allIds = [];
     let afterId = "";
 
@@ -99,6 +119,7 @@ export class ProtonMailClient {
     return payload?.Counts || [];
   }
 
+  /** @param {string[]} messageIds */
   async deleteMessages(messageIds) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/delete", {
@@ -108,6 +129,7 @@ export class ProtonMailClient {
     }
   }
 
+  /** @param {string[]} messageIds */
   async markMessagesRead(messageIds) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/read", {
@@ -117,6 +139,7 @@ export class ProtonMailClient {
     }
   }
 
+  /** @param {string[]} messageIds */
   async markMessagesUnread(messageIds) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/unread", {
@@ -126,6 +149,10 @@ export class ProtonMailClient {
     }
   }
 
+  /**
+   * @param {string[]} messageIds
+   * @param {string} labelId
+   */
   async labelMessages(messageIds, labelId) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/label", {
@@ -135,6 +162,10 @@ export class ProtonMailClient {
     }
   }
 
+  /**
+   * @param {string[]} messageIds
+   * @param {string} labelId
+   */
   async unlabelMessages(messageIds, labelId) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/unlabel", {
@@ -144,6 +175,7 @@ export class ProtonMailClient {
     }
   }
 
+  /** @param {string[]} messageIds */
   async markMessagesForwarded(messageIds) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/forward", {
@@ -153,6 +185,7 @@ export class ProtonMailClient {
     }
   }
 
+  /** @param {string[]} messageIds */
   async markMessagesUnforwarded(messageIds) {
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
       await this.#http.request("PUT", "/mail/v4/messages/unforward", {
@@ -162,6 +195,7 @@ export class ProtonMailClient {
     }
   }
 
+  /** @param {string} attachmentId */
   async getAttachment(attachmentId) {
     const response = await this.#http.requestRaw("GET", `/mail/v4/attachments/${enc(attachmentId)}`, {
       uid: this.#uid,
@@ -169,7 +203,9 @@ export class ProtonMailClient {
     return Buffer.from(await response.arrayBuffer());
   }
 
+  /** @param {number[]} [types] */
   async getLabels(types = []) {
+    /** @type {unknown[]} */
     const allLabels = [];
     const labelTypes = types.length > 0 ? types : [1, 3, 4];
 
@@ -184,7 +220,14 @@ export class ProtonMailClient {
     return allLabels;
   }
 
+  /**
+   * @param {string} name
+   * @param {string} color
+   * @param {number} [type]
+   * @param {string} [parentId]
+   */
   async createLabel(name, color, type = 1, parentId) {
+    /** @type {{ Name: string, Color: string, Type: number, ParentID?: string }} */
     const body = { Name: name, Color: color, Type: type };
     if (parentId) body.ParentID = parentId;
 
@@ -195,7 +238,14 @@ export class ProtonMailClient {
     return payload?.Label;
   }
 
+  /**
+   * @param {string} labelId
+   * @param {string} name
+   * @param {string} color
+   * @param {string} [parentId]
+   */
   async updateLabel(labelId, name, color, parentId) {
+    /** @type {{ Name: string, Color: string, ParentID?: string }} */
     const body = { Name: name, Color: color };
     if (parentId !== undefined) body.ParentID = parentId;
 
@@ -206,12 +256,14 @@ export class ProtonMailClient {
     return payload?.Label;
   }
 
+  /** @param {string} labelId */
   async deleteLabel(labelId) {
     await this.#http.request("DELETE", `/core/v4/labels/${enc(labelId)}`, {
       uid: this.#uid,
     });
   }
 
+  /** @param {string} conversationId */
   async getConversation(conversationId) {
     const payload = await this.#http.request("GET", `/mail/v4/conversations/${enc(conversationId)}`, {
       uid: this.#uid,
@@ -219,6 +271,11 @@ export class ProtonMailClient {
     return payload;
   }
 
+  /**
+   * @param {ProtonFilter} [filter]
+   * @param {number} [page]
+   * @param {number} [pageSize]
+   */
   async getConversations(filter = {}, page = 0, pageSize = MAX_PAGE_SIZE) {
     const body = {
       ...filter,
@@ -245,6 +302,7 @@ export class ProtonMailClient {
     return payload?.EventID;
   }
 
+  /** @param {string} eventId */
   async getEvents(eventId) {
     const payload = await this.#http.request("GET", `/core/v5/events/${enc(eventId)}`, {
       uid: this.#uid,
@@ -252,15 +310,27 @@ export class ProtonMailClient {
     return payload;
   }
 
+  /**
+   * @param {string} method
+   * @param {string} pathname
+   * @param {import("./http.js").RequestOptions} [options]
+   */
   async api(method, pathname, options = {}) {
     return this.#http.request(method, pathname, { uid: this.#uid, ...options });
   }
 }
 
+/** @param {string} value */
 function enc(value) {
   return encodeURIComponent(value);
 }
 
+/**
+ * @template T
+ * @param {T[]} array
+ * @param {number} size
+ * @returns {T[][]}
+ */
 function chunks(array, size) {
   const result = [];
   for (let i = 0; i < array.length; i += size) {
