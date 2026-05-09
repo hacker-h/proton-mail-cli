@@ -5,13 +5,32 @@ const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const DEFAULT_DEBUG_PROFILE_DIR = path.join(ROOT_DIR, "data", "debug-profile");
 
 /**
+ * @typedef {{ enabled: false }} DisabledDebugConfig
+ * @typedef {{
+ *   enabled: true,
+ *   headless: false,
+ *   cdpPort: number,
+ *   profileDir: string,
+ *   executablePath: string,
+ *   manualTimeoutSeconds: number,
+ *   suppressCooldown: boolean,
+ *   keepOpenOnError: boolean,
+ *   slowMo: number,
+ *   verbose: boolean,
+ *   persistProfile: boolean
+ * }} EnabledDebugConfig
+ * @typedef {DisabledDebugConfig | EnabledDebugConfig} DebugConfig
+ * @typedef {{ debug?: boolean | Partial<EnabledDebugConfig> }} DebugOptions
+ */
+
+/**
  * Resolve debug configuration from constructor options and environment variables.
  *
  * Precedence: explicit constructor option > env var > safe default (disabled)
  *
- * @param {*} options - Raw constructor options (may have options.debug)
- * @param {*} env - Environment variables object (e.g. process.env or a mock)
- * @returns {object}
+ * @param {DebugOptions} options - Raw constructor options (may have options.debug)
+ * @param {Record<string, string | undefined>} env - Environment variables object (e.g. process.env or a mock)
+ * @returns {DebugConfig}
  */
 export function resolveDebugConfig(options, env) {
   const debugOption = options.debug;
@@ -29,6 +48,7 @@ export function resolveDebugConfig(options, env) {
     return { enabled: false };
   }
 
+  /** @type {Partial<EnabledDebugConfig>} */
   const overrides = typeof debugOption === "object" && debugOption !== null ? debugOption : {};
 
   return {

@@ -18,6 +18,10 @@ export class ApiError extends Error {
 }
 
 export class RateLimitError extends ApiError {
+  /**
+   * @param {string} message
+   * @param {{ retryAfter?: number | null, retryAfterMs?: number | null, [key: string]: unknown }} [details]
+   */
   constructor(message, details = {}) {
     super(429, "RATE_LIMITED", message, details);
     this.name = "RateLimitError";
@@ -27,6 +31,10 @@ export class RateLimitError extends ApiError {
 }
 
 export class SessionExpiredError extends ApiError {
+  /**
+   * @param {string} [message]
+   * @param {object} [details]
+   */
   constructor(message = "Saved Proton Mail session expired", details = {}) {
     super(401, "SESSION_EXPIRED", message, details);
     this.name = "SessionExpiredError";
