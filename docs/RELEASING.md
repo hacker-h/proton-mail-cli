@@ -12,6 +12,10 @@ semantic-release reads Conventional Commits from git history and publishes a Git
 
 The release job runs `pnpm ci:offline` before publishing, so release eligibility matches the deterministic pull-request gate.
 
+## Changelog
+
+semantic-release writes release notes to `CHANGELOG.md` during the release and commits the changelog plus the release `package.json` version back to `main` with a `[skip ci]` release commit.
+
 ## First Release Baseline
 
 This repository currently has no release tags. The first semantic-release run on `main` will calculate its release from the existing Conventional Commit history. If maintainers need to preserve the current `package.json` version line as the first baseline, create the intended baseline tag before merging release automation.
@@ -20,7 +24,7 @@ This repository currently has no release tags. The first semantic-release run on
 
 `package.json` is currently marked `private`, so releases do not publish to the npm registry. The release workflow instead runs `@semantic-release/npm` with `npmPublish: false`, creates a packed `.tgz` artifact, and attaches that tarball to the GitHub Release.
 
-semantic-release updates `package.json` only in the release job workspace before packing. The version bump is intentionally not committed back to the repository; git tags and GitHub Releases are the source of truth for released versions while the package remains GitHub-release-only.
+semantic-release updates `package.json` in the release job workspace before packing. The release commit stores the changelog and package version in git, while the git tag and GitHub Release remain the source of truth for the published artifact.
 
 If this package should be published to npm later:
 
