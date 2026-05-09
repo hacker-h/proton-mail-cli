@@ -3,8 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.9",
+  "bin": {
+    "pm": "./bin/pm.js"
+  },
   "type": "module",
   "files": [
+    "bin/",
     "examples/",
     "src/",
     "scripts/",

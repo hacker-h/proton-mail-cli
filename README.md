@@ -7,6 +7,70 @@ Reusable Proton Mail client package with two layers:
 
 The browser client is the canonical dependency surface when other local projects need to log into Proton Mail and read email content programmatically.
 
+## CLI Usage
+
+This package installs a `pm` binary for automation-friendly Proton Mail commands. Issue #1 defines the command contract only: help, version, global flags, aliases, dispatch, output envelopes, and stable exit codes. The mail commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login.
+
+Local workspace usage:
+
+```bash
+pnpm node bin/pm.js --help
+pnpm node bin/pm.js version
+pnpm node bin/pm.js ls --json
+```
+
+Installed package usage:
+
+```bash
+pm --help
+pm version
+pm ls
+pm mail latest
+pm read <messageId>
+pm otp --json
+```
+
+Global flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--json` | Emits the stable JSON envelope. Equivalent to `--format json`. |
+| `--format <human\|json>` | Selects human output or JSON output. |
+| `--timeout <seconds>` | Passes a positive integer timeout to injected clients. |
+| `--config <path>` | Passes a config path to injected clients. |
+| `--session <path>` | Passes a Proton session path to injected clients. |
+| `--quiet` | Suppresses human success output. Errors still go to stderr. |
+| `--verbose` | Passes verbose mode to injected clients. |
+
+Alias policy:
+
+- `pm ls`, `pm list`, `pm inbox`, and `pm mail list` all dispatch to `mail:list`.
+- `pm read <messageId>` dispatches to `mail:read`.
+- Long-form feature commands remain available under `pm mail ...` as they land.
+
+JSON output uses a single envelope convention for follow-up commands:
+
+```json
+{
+  "ok": true,
+  "command": "version",
+  "data": { "version": "0.1.0" },
+  "error": null,
+  "meta": { "version": "0.1.0", "envelope": "pm.v1" }
+}
+```
+
+JSON errors keep the same shape with `ok: false`, `data: null`, and a stable `error.code` plus human-readable `error.message`. Success output goes to stdout. Errors, including JSON envelopes for failed commands, go to stderr.
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success, help, or version. |
+| `1` | Usage error such as unknown commands, invalid flags, or missing arguments. |
+| `2` | Command contract exists, but no injected client implementation is available. |
+| `3` | Unexpected runtime failure. |
+
 ## Browser Client Usage
 
 ```js
@@ -144,12 +208,15 @@ See [docs/session-store.md](docs/session-store.md) for the full method contract,
 
 ```
 src/
+  cli.js
   index.js
   browser-client.js
   client.js
   http.js
   errors.js
   constants.js
+bin/
+  pm.js
 ```
 
 ## Debug Mode
