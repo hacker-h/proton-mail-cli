@@ -37,8 +37,8 @@ Global flags:
 | `--json` | Emits the stable JSON envelope. Equivalent to `--format json`. |
 | `--format <human\|json>` | Selects human output or JSON output. |
 | `--timeout <seconds>` | Passes a positive integer timeout to injected clients. |
-| `--config <path>` | Passes a config path to injected clients. |
-| `--session <path>` | Passes a Proton session path to injected clients. |
+| `--config <path>` | Reads CLI config from a JSON file. Overrides `PROTONMAIL_CONFIG_FILE`. |
+| `--session <path>` | Uses a Proton session state path. Overrides env and config files. |
 | `--quiet` | Suppresses human success output. Errors still go to stderr. |
 | `--verbose` | Passes verbose mode to injected clients. |
 
@@ -70,6 +70,38 @@ Exit codes:
 | `1` | Usage error such as unknown commands, invalid flags, or missing arguments. |
 | `2` | Command contract exists, but no injected client implementation is available. |
 | `3` | Unexpected runtime failure. |
+
+### Non-Interactive Configuration
+
+Configuration resolves in this order: CLI flags, environment variables, JSON config file, then OS defaults. The default config file is `~/Library/Application Support/proton-mail-cli/config.json` on macOS, `$XDG_CONFIG_HOME/proton-mail-cli/config.json` on Linux when set, or `~/.config/proton-mail-cli/config.json`. The default browser session file is stored under the user cache directory, not repo-local `data/`.
+
+Supported environment variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `PROTONMAIL_CONFIG_FILE` | Config JSON path when `--config` is not provided. |
+| `PROTONMAIL_SESSION_FILE` | Browser storage-state/session path when `--session` is not provided. |
+| `PROTONMAIL_TIMEOUT_SECONDS` | Positive integer timeout for injected clients. |
+| `PROTONMAIL_USERNAME` | Proton username. |
+| `PROTONMAIL_USERNAME_FILE` | File containing the Proton username. |
+| `PROTONMAIL_USERNAME_COMMAND` | Command that prints the Proton username. |
+| `PROTONMAIL_PASSWORD` | Proton password. |
+| `PROTONMAIL_PASSWORD_FILE` | File containing the Proton password. |
+| `PROTONMAIL_PASSWORD_COMMAND` | Command that prints the Proton password. |
+
+Secret precedence is direct env var, then `*_FILE`, then `*_COMMAND`. Doctor output reports whether secrets are configured and where they came from, but never prints secret values.
+
+Example CI setup:
+
+```bash
+export PROTONMAIL_SESSION_FILE="$RUNNER_TEMP/protonmail-auth.json"
+export PROTONMAIL_USERNAME_FILE="$RUNNER_TEMP/protonmail-username"
+export PROTONMAIL_PASSWORD_FILE="$RUNNER_TEMP/protonmail-password"
+pm doctor config --json
+pm doctor session --json
+```
+
+`pm doctor config --json` explains config, path, secret, and timeout sources. `pm doctor session --json` reports stable statuses such as `missing_session`, `session_ready`, `session_unreadable`, `expired_session`, `manual_required`, `upstream_failure`, and `auth_ready`.
 
 ## Browser Client Usage
 
