@@ -800,7 +800,9 @@ function writePrivateJsonFile(filePath, value) {
       if (fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
       }
-    } catch {}
+    } catch (cleanupError) {
+      debugLog(`Failed to remove temporary private JSON file ${tempFile}`, cleanupError);
+    }
     throw error;
   }
 }
