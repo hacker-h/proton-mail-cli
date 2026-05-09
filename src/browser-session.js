@@ -209,7 +209,9 @@ export function writePrivateJsonFile(filePath, value) {
       if (fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
       }
-    } catch {}
+    } catch (cleanupError) {
+      debugLog(`Failed to clean up temporary file ${tempFile}`, cleanupError);
+    }
     throw error;
   }
 }
