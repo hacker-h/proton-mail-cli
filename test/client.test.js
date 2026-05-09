@@ -2,42 +2,78 @@ import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import { ProtonMailClient, Labels, ApiError, RateLimitError } from "../src/index.js";
 
-function mockSessionStore(uid = "test-uid") {
-  return {
-    getCookieHeader: mock.fn(async () => "AUTH-test-uid=tok; Session-Id=sid"),
+function mockSessionStore(options = "test-uid") {
+  const config = typeof options === "string" ? { uid: options } : options;
+  const uid = config.uid || "test-uid";
+  const cookieHeader = config.cookieHeader ?? "AUTH-test-uid=tok; Session-Id=sid";
+  const store = {
+    getCookieHeader: mock.fn(async (url) => {
+      if (typeof cookieHeader === "function") return cookieHeader(url);
+      return cookieHeader;
+    }),
     getUIDCandidates: mock.fn(async () => [uid]),
   };
+
+  if ("refreshPayload" in config) {
+    store.getRefreshPayload = mock.fn(async () => config.refreshPayload);
+  }
+  if ("applySetCookieHeaders" in config) {
+    store.applySetCookieHeaders = mock.fn(config.applySetCookieHeaders);
+  }
+  if ("invalidate" in config) {
+    store.invalidate = mock.fn(config.invalidate);
+  }
+
+  return store;
 }
 
-function mockFetch(status, body, headers = {}) {
-  return mock.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    headers: mockHeaders(headers),
-    text: async () => JSON.stringify(body),
-    arrayBuffer: async () => new ArrayBuffer(0),
-  }));
+function mockFetch(status, body, headers = {}, bytes) {
+  return mock.fn(async () => mockResponse({ status, body, headers, bytes }));
 }
 
 function mockFetchSequence(responses) {
   let index = 0;
   return mock.fn(async () => {
     const response = responses[index++];
-    return {
-      ok: response.status >= 200 && response.status < 300,
-      status: response.status,
-      headers: mockHeaders(response.headers),
-      text: async () => JSON.stringify(response.body),
-      arrayBuffer: async () => new ArrayBuffer(0),
-    };
+    if (!response) throw new Error("Unexpected fetch call");
+    if (response.throws) throw response.throws;
+    return mockResponse(response);
   });
 }
 
 function mockHeaders(values = {}) {
+  const normalized = Object.fromEntries(
+    Object.entries(values)
+      .filter(([key]) => key !== "setCookies")
+      .map(([key, value]) => [key.toLowerCase(), value]),
+  );
   return {
-    get: (name) => values[name.toLowerCase()] ?? null,
-    getSetCookie: () => [],
+    get: (name) => normalized[name.toLowerCase()] ?? null,
+    getSetCookie: () => values.setCookies || [],
   };
+}
+
+function mockResponse(response) {
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    headers: mockHeaders(response.headers),
+    text: async () => responseText(response),
+    arrayBuffer: async () => responseArrayBuffer(response),
+  };
+}
+
+function responseText(response) {
+  if (response.text !== undefined) return response.text;
+  if (response.body === undefined) return "";
+  if (typeof response.body === "string") return response.body;
+  return JSON.stringify(response.body);
+}
+
+function responseArrayBuffer(response) {
+  if (response.bytes === undefined) return new ArrayBuffer(0);
+  const bytes = response.bytes instanceof Uint8Array ? response.bytes : Buffer.from(response.bytes);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 describe("ProtonMailClient", () => {
@@ -173,6 +209,94 @@ describe("ProtonMailClient", () => {
     assert.equal(fetchOptions.method, "PUT");
   });
 
+  it("returns raw attachment bytes with binary request headers", async () => {
+    const bytes = Uint8Array.from([0, 1, 255, 65]);
+    const fetchImpl = mockFetch(200, "", {}, bytes);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const attachment = await client.getAttachment("att/1");
+
+    assert.deepEqual(attachment, Buffer.from(bytes));
+    const [calledUrl, fetchOptions] = fetchImpl.mock.calls[0].arguments;
+    assert.ok(calledUrl.toString().includes("/mail/v4/attachments/att%2F1"));
+    assert.equal(fetchOptions.method, "GET");
+    assert.equal(fetchOptions.headers.Accept, "application/octet-stream");
+    assert.equal(fetchOptions.headers.Cookie, "AUTH-test-uid=tok; Session-Id=sid");
+    assert.equal(fetchOptions.headers["x-pm-uid"], "test-uid");
+    assert.ok(fetchOptions.signal instanceof AbortSignal);
+  });
+
+  it("persists Set-Cookie headers from raw attachment responses", async () => {
+    const sessionStore = mockSessionStore({
+      applySetCookieHeaders: async () => undefined,
+    });
+    const fetchImpl = mockFetch(200, "", {
+      setCookies: ["AUTH-test-uid=fresh; Path=/; HttpOnly"],
+    });
+    const client = new ProtonMailClient({ sessionStore, fetchImpl });
+
+    await client.getAttachment("att1");
+
+    assert.equal(sessionStore.applySetCookieHeaders.mock.calls.length, 1);
+    const [url, cookies] = sessionStore.applySetCookieHeaders.mock.calls[0].arguments;
+    assert.ok(url.includes("/mail/v4/attachments/att1"));
+    assert.deepEqual(cookies, ["AUTH-test-uid=fresh; Path=/; HttpOnly"]);
+  });
+
+  it("refreshes auth and retries raw attachment fetches", async () => {
+    const bytes = Uint8Array.from([9, 8, 7]);
+    const refreshPayload = { RefreshToken: "refresh-token" };
+    const sessionStore = mockSessionStore({
+      refreshPayload,
+      applySetCookieHeaders: async () => undefined,
+      invalidate: async () => undefined,
+    });
+    const fetchImpl = mockFetchSequence([
+      { status: 401, body: { Code: 401, Error: "Unauthorized" } },
+      {
+        status: 200,
+        body: { Code: 1000 },
+        headers: { setCookies: ["AUTH-test-uid=fresh; Path=/; HttpOnly"] },
+      },
+      { status: 200, body: "", bytes },
+    ]);
+    const client = new ProtonMailClient({ sessionStore, fetchImpl, maxRetries: 0 });
+
+    const attachment = await client.getAttachment("att1");
+
+    assert.deepEqual(attachment, Buffer.from(bytes));
+    assert.equal(fetchImpl.mock.calls.length, 3);
+    const [refreshUrl, refreshOptions] = fetchImpl.mock.calls[1].arguments;
+    assert.ok(refreshUrl.toString().includes("/auth/refresh"));
+    assert.equal(refreshOptions.method, "POST");
+    assert.deepEqual(JSON.parse(refreshOptions.body), refreshPayload);
+    assert.equal(sessionStore.invalidate.mock.calls.length, 1);
+    assert.equal(sessionStore.applySetCookieHeaders.mock.calls.length, 1);
+  });
+
+  it("throws AUTH_EXPIRED when raw auth refresh fails", async () => {
+    const sessionStore = mockSessionStore({
+      refreshPayload: { RefreshToken: "refresh-token" },
+    });
+    const fetchImpl = mockFetchSequence([
+      { status: 403, body: { Code: 403, Error: "Forbidden" } },
+      { status: 401, body: { Code: 401, Error: "Refresh failed" } },
+      { status: 401, body: { Code: 401, Error: "Refresh failed" } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore, fetchImpl, maxRetries: 0 });
+
+    await assert.rejects(() => client.getAttachment("att1"), (err) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 401);
+      assert.equal(err.code, "AUTH_EXPIRED");
+      return true;
+    });
+
+    assert.equal(fetchImpl.mock.calls.length, 3);
+    assert.ok(fetchImpl.mock.calls[1].arguments[0].toString().includes("/auth/refresh"));
+    assert.ok(fetchImpl.mock.calls[2].arguments[0].toString().includes("/auth/v4/refresh"));
+  });
+
   it("backs off using Retry-After seconds before retrying 429 responses", async () => {
     const sleeps = [];
     const fetchImpl = mockFetchSequence([
@@ -273,6 +397,26 @@ describe("ProtonMailClient", () => {
     assert.deepEqual(sleeps, [1000]);
   });
 
+  it("backs off 5xx responses for raw attachment fetches", async () => {
+    const sleeps = [];
+    const bytes = Uint8Array.from([4, 2]);
+    const fetchImpl = mockFetchSequence([
+      { status: 503, body: "" },
+      { status: 200, body: "", bytes },
+    ]);
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      sleep: async (ms) => sleeps.push(ms),
+    });
+
+    const attachment = await client.getAttachment("att1");
+
+    assert.deepEqual(attachment, Buffer.from(bytes));
+    assert.equal(fetchImpl.mock.calls.length, 2);
+    assert.deepEqual(sleeps, [400]);
+  });
+
   it("throws RateLimitError when raw attachment rate-limit budget is exhausted", async () => {
     const sleeps = [];
     const fetchImpl = mockFetchSequence([
@@ -288,10 +432,78 @@ describe("ProtonMailClient", () => {
 
     await assert.rejects(() => client.getAttachment("att1"), (err) => {
       assert.ok(err instanceof RateLimitError);
+      assert.equal(err.status, 429);
+      assert.equal(err.code, "RATE_LIMITED");
       assert.equal(err.retryAfter, 2);
       assert.equal(err.retryAfterMs, 2000);
       return true;
     });
     assert.deepEqual(sleeps, [2000]);
+  });
+
+  it("throws structured errors for raw attachment failures", async () => {
+    const notFoundClient = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl: mockFetch(404, { Code: 404, Error: "Not found" }),
+    });
+
+    await assert.rejects(() => notFoundClient.getAttachment("missing"), (err) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 404);
+      assert.equal(err.code, "NOT_FOUND");
+      return true;
+    });
+
+    const failedClient = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl: mockFetch(400, { Code: 400, Error: "Bad request" }),
+    });
+
+    await assert.rejects(() => failedClient.getAttachment("bad"), (err) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 400);
+      assert.equal(err.code, "UPSTREAM_ERROR");
+      assert.equal(err.message, "Attachment fetch failed: 400");
+      assert.deepEqual(err.details.payload, { Code: 400, Error: "Bad request" });
+      return true;
+    });
+  });
+
+  it("uses deterministic backoff for raw 429 responses without Retry-After", async () => {
+    const sleeps = [];
+    const fetchImpl = mockFetchSequence([
+      { status: 429, body: { Code: 429 } },
+      { status: 200, body: "", bytes: Uint8Array.from([1]) },
+    ]);
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      sleep: async (ms) => sleeps.push(ms),
+      rateLimit: { baseDelayMs: 100, maxDelayMs: 100, jitterRatio: 0.2 },
+    });
+
+    await client.getAttachment("att1");
+
+    // See src/http.js pseudoRandom01(1) => ((1 * 1103515245 + 12345) >>> 0) / 2^32 ≈ 0.2569
+    assert.deepEqual(sleeps, [105]);
+  });
+
+  it("wraps raw attachment timeout errors", async () => {
+    const timeout = new Error("The operation timed out");
+    timeout.name = "TimeoutError";
+    const fetchImpl = mockFetchSequence([{ throws: timeout }]);
+    const client = new ProtonMailClient({
+      sessionStore: mockSessionStore(),
+      fetchImpl,
+      maxRetries: 0,
+    });
+
+    await assert.rejects(() => client.getAttachment("att1"), (err) => {
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 502);
+      assert.equal(err.code, "UPSTREAM_UNREACHABLE");
+      assert.equal(err.details.message, "The operation timed out");
+      return true;
+    });
   });
 });

@@ -208,6 +208,7 @@ export class ProtonHttp {
   async requestRaw(method, pathname, options = {}) {
     const uid = options.uid || (await this.#resolveUID());
     const url = new URL(pathname, this.#baseUrl);
+    const canRetry = isRetryableMethod(method);
 
     const headers = {
       Accept: "application/octet-stream",
@@ -216,35 +217,95 @@ export class ProtonHttp {
       "x-pm-uid": uid,
     };
 
+    let authRefreshAttempted = false;
+    let attempt = 0;
     let rateLimitAttempts = 0;
 
-    while (true) {
-      const cookieHeader = await this.#sessionStore.getCookieHeader(url.toString());
-      if (!cookieHeader) {
-        throw new ApiError(401, "AUTH_EXPIRED", "No valid session cookies available");
-      }
+    while (attempt <= this.#maxRetries) {
+      const isFinal = attempt === this.#maxRetries;
+      attempt++;
 
-      const response = await this.#fetchImpl(url, {
-        method,
-        headers: { ...headers, Cookie: cookieHeader },
-        signal: AbortSignal.timeout(this.#timeoutMs),
-      });
-
-      if (response.status === 429) {
-        if (rateLimitAttempts >= this.#rateLimitMaxRetries) {
-          throw this.#rateLimitError(response);
+      try {
+        const cookieHeader = await this.#sessionStore.getCookieHeader(url.toString());
+        if (!cookieHeader) {
+          throw new ApiError(401, "AUTH_EXPIRED", "No valid session cookies available");
         }
-        rateLimitAttempts++;
-        await this.#sleep(this.#rateLimitDelayMs(response.headers, rateLimitAttempts));
-        continue;
-      }
 
-      if (!response.ok) {
-        throw new ApiError(response.status, "UPSTREAM_ERROR", `Attachment fetch failed: ${response.status}`);
-      }
+        const response = await this.#fetchImpl(url, {
+          method,
+          headers: { ...headers, Cookie: cookieHeader },
+          signal: AbortSignal.timeout(this.#timeoutMs),
+        });
 
-      return response;
+        await this.#persistSetCookies(url, response);
+
+        if (response.ok && isJsonResponse(response)) {
+          const payload = await safeParsePayload(typeof response.clone === "function" ? response.clone() : response);
+          if (payload && typeof payload === "object" && typeof payload.Code === "number") {
+            if (!SUCCESS_CODES.includes(payload.Code)) {
+              throw new ApiError(502, "UPSTREAM_ERROR", payload.Error || "Unexpected upstream response", { payload });
+            }
+          }
+        }
+
+        if (response.status === 401 || response.status === 403) {
+          if (!authRefreshAttempted) {
+            authRefreshAttempted = true;
+            const refreshed = await this.#attemptAuthRefresh(uid);
+            if (refreshed) {
+              attempt--;
+              continue;
+            }
+          }
+          throw new ApiError(401, "AUTH_EXPIRED", "Proton session is expired or unauthorized");
+        }
+
+        if (response.status === 404) {
+          throw new ApiError(404, "NOT_FOUND", "Resource not found");
+        }
+
+        if (response.status === 429) {
+          const payload = await safeParsePayload(response);
+          if (rateLimitAttempts >= this.#rateLimitMaxRetries) {
+            throw this.#rateLimitError(response, payload);
+          }
+          rateLimitAttempts++;
+          attempt--;
+          await this.#sleep(this.#rateLimitDelayMs(response.headers, rateLimitAttempts));
+          continue;
+        }
+
+        if (canRetry && response.status >= 500 && !isFinal) {
+          await this.#sleep(backoffMs(attempt));
+          continue;
+        }
+
+        if (!response.ok) {
+          const payload = await safeParsePayload(response);
+          throw new ApiError(response.status, "UPSTREAM_ERROR", `Attachment fetch failed: ${response.status}`, {
+            payload,
+          });
+        }
+
+        return response;
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        if (isFinal) {
+          throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend", {
+            message: error?.message,
+          });
+        }
+        if (canRetry) {
+          await this.#sleep(backoffMs(attempt));
+        } else {
+          throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend", {
+            message: error?.message,
+          });
+        }
+      }
     }
+
+    throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend");
   }
 
   async #resolveUID() {
@@ -407,5 +468,28 @@ function parseRetryAfterMs(headers) {
  */
 function rateLimitBackoffMs(attempt, baseDelayMs, maxDelayMs, jitterRatio) {
   const base = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
-  return Math.round(base + base * jitterRatio * Math.random());
+  return Math.round(base + base * jitterRatio * pseudoRandom01(attempt));
+}
+
+function isJsonResponse(response) {
+  const contentType = response?.headers?.get?.("content-type") || "";
+  return contentType.includes("application/json") || contentType.includes("application/vnd.protonmail.v1+json");
+}
+
+async function safeParsePayload(response) {
+  try {
+    return await parsePayload(response);
+  } catch {
+    return null;
+  }
+}
+
+function isRetryableMethod(method) {
+  const upper = String(method || "").toUpperCase();
+  return upper === "GET" || upper === "HEAD";
+}
+
+function pseudoRandom01(attempt) {
+  const value = (Math.imul(attempt, 1103515245) + 12345) >>> 0;
+  return value / 0x1_0000_0000;
 }
