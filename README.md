@@ -118,6 +118,9 @@ if (otp.success) {
 
 ### Browser Client Runtime Notes
 
+- `protonmail-api-client` imports `playwright-core` at runtime. `playwright-core` provides the API but does not install browser binaries.
+- In this repo, local development uses the `playwright` dev dependency; run `pnpm exec playwright install chromium` if Chromium is missing.
+- Package consumers should either install a compatible Chromium and pass `debug.executablePath` / `PROTONMAIL_DEBUG_CHROMIUM`, or depend on `playwright` and run its browser installer as part of setup.
 - Fresh automated logins can trigger Proton CAPTCHA or other human-verification challenges.
 - Accounts with 2FA/TOTP enabled require manual completion. The browser client detects Proton's 2FA/TOTP step and returns a structured failure such as `{ success: false, twoFactor: true, manualRequired: true }`; it does not generate or submit TOTP codes.
 - The durable operational model is:
@@ -229,6 +232,8 @@ PROTONMAIL_DEBUG=1 node scripts/debug-login.mjs
 ```
 
 This opens a headful Chromium browser with CDP enabled, keeps it open on failure, and suppresses cooldown writes. See [DEBUG.md](DEBUG.md) for full documentation including Playwright MCP attach instructions.
+
+Debug mode records structured `debugEvents` for selector fallbacks, navigation timeouts, CAPTCHA detection, and message extraction failures. Events redact secret-bearing fields and email-like values before they are returned or printed.
 
 ## CI/CD
 

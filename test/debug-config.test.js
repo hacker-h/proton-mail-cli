@@ -61,4 +61,16 @@ describe("resolveDebugConfig", () => {
     assert.equal(result.enabled, true);
     assert.equal(result.persistProfile, true);
   });
+
+  it("object option overrides manual debug timeout", () => {
+    const result = resolveDebugConfig({ debug: { manualTimeoutSeconds: 42 } }, {});
+    assert.equal(result.enabled, true);
+    assert.equal(result.manualTimeoutSeconds, 42);
+  });
+
+  it("env var overrides manual debug timeout", () => {
+    const result = resolveDebugConfig({}, { PROTONMAIL_DEBUG: "1", PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS: "123" });
+    assert.equal(result.enabled, true);
+    assert.equal(result.manualTimeoutSeconds, 123);
+  });
 });

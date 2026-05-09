@@ -1,0 +1,169 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { debugLog } from "./browser-debug.js";
+import { SessionExpiredError } from "./errors.js";
+
+export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const DATA_DIR = path.join(ROOT_DIR, "data");
+export const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
+const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
+const PRIVATE_FILE_MODE = 0o600;
+
+export function normalizePath(filePath) {
+  return filePath ? path.resolve(String(filePath)) : "";
+}
+
+export function normalizeAbsolutePath(filePath) {
+  if (!filePath) {
+    return "";
+  }
+  const candidate = String(filePath).trim();
+  return path.isAbsolute(candidate) ? path.resolve(candidate) : "";
+}
+
+export function env(name, fallback = "") {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+export function ensureDir(dirPath) {
+  if (!dirPath) {
+    return;
+  }
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+export function ensurePrivateDir(dirPath) {
+  ensureDir(dirPath);
+  try {
+    fs.chmodSync(dirPath, 0o700);
+  } catch (error) {
+    debugLog(`Failed to set private directory permissions for ${dirPath}`, error);
+  }
+}
+
+export function loadEnvFile(filePath) {
+  const trustedPath = normalizeAbsolutePath(filePath);
+  if (!trustedPath || !fs.existsSync(trustedPath)) {
+    return false;
+  }
+  const lines = fs.readFileSync(trustedPath, "utf8").split(/\r?\n/u);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) {
+      continue;
+    }
+    const index = line.indexOf("=");
+    const key = line.slice(0, index).trim();
+    if (!key || process.env[key]) {
+      continue;
+    }
+    let value = line.slice(index + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+  return true;
+}
+
+export function loadStorageState(sessionFile) {
+  if (!fs.existsSync(sessionFile)) {
+    return { exists: false, storageState: null, error: null };
+  }
+  try {
+    return {
+      exists: true,
+      storageState: JSON.parse(fs.readFileSync(sessionFile, "utf8")),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      storageState: null,
+      error: error?.message || "Session file unreadable",
+    };
+  }
+}
+
+export function isExpiredSavedSession(storage, navigation) {
+  return Boolean(storage?.exists && storage.storageState && navigation?.state === "login");
+}
+
+export function cooldownFile(sessionFile) {
+  return path.join(path.dirname(sessionFile), "protonmail-login-cooldown.json");
+}
+
+export function getCooldownState(sessionFile) {
+  const filePath = cooldownFile(sessionFile);
+  if (!fs.existsSync(filePath)) {
+    return { active: false };
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    const lastFailedAt = data?.lastFailedAt ? Date.parse(data.lastFailedAt) : Number.NaN;
+    if (!Number.isFinite(lastFailedAt)) {
+      return { active: false };
+    }
+    return { active: Date.now() - lastFailedAt < LOGIN_COOLDOWN_MS };
+  } catch (error) {
+    debugLog(`Failed to read login cooldown file ${filePath}`, error);
+    return { active: false };
+  }
+}
+
+export function writeCooldown(sessionFile, reason) {
+  const filePath = cooldownFile(sessionFile);
+  writePrivateJsonFile(filePath, { lastFailedAt: new Date().toISOString(), reason });
+}
+
+export function clearCooldown(sessionFile) {
+  const filePath = cooldownFile(sessionFile);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
+export async function saveSession(context, sessionFile) {
+  const storageState = await context.storageState();
+  writePrivateJsonFile(sessionFile, storageState);
+}
+
+export function writePrivateJsonFile(filePath, value) {
+  ensurePrivateDir(path.dirname(filePath));
+  const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  try {
+    fs.writeFileSync(tempFile, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
+    fs.renameSync(tempFile, filePath);
+  } catch (error) {
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch {}
+    throw error;
+  }
+}
+
+export function resultWithError(error, extra = {}) {
+  if (error instanceof Error) {
+    return {
+      success: false,
+      error: error.message,
+      errorName: error.name,
+      code: error.code,
+      status: error.status,
+      details: error.details,
+      ...extra,
+    };
+  }
+  return { success: false, error, ...extra };
+}
+
+export function sessionExpiredResult(details = {}) {
+  return resultWithError(new SessionExpiredError("Saved Proton Mail session expired; refresh the session file", details), {
+    sessionExpired: true,
+    sessionValid: false,
+  });
+}
