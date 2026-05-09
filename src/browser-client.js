@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { resolveDebugConfig } from "./debug-config.js";
-import { SessionExpiredError } from "./errors.js";
+import { ApiError, SessionExpiredError } from "./errors.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
@@ -20,10 +20,61 @@ const POLL_INTERVAL_MS = 5000;
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
 const PRIVATE_FILE_MODE = 0o600;
 
+/**
+ * @typedef {import("playwright-core").Browser} Browser
+ * @typedef {import("playwright-core").BrowserContext} BrowserContext
+ * @typedef {import("playwright-core").Page} Page
+ * @typedef {import("playwright-core").Frame} Frame
+ * @typedef {import("playwright-core").BrowserType} BrowserFactory
+ * @typedef {NonNullable<import("playwright-core").BrowserContextOptions["storageState"]>} StorageState
+ * @typedef {import("./debug-config.js").DebugConfig} DebugConfig
+ * @typedef {{ index: number, preview: string }} MessagePreview
+ * @typedef {{ success: false, error: string, [key: string]: unknown }} ErrorResult
+ * @typedef {{ success: true, loginMethod?: string, sessionValid?: boolean, sessionFileExists?: boolean }} LoginSuccess
+ * @typedef {ErrorResult | LoginSuccess} LoginResult
+ * @typedef {LoginResult | (LoginResult & Partial<SessionHandles>)} LoginAndSaveSessionResult
+ * @typedef {{ success: true, subject: string, bodyText: string }} ExtractedMessage
+ * @typedef {ErrorResult | ExtractedMessage} ExtractMessageResult
+ * @typedef {{ browser?: Browser | null, context?: BrowserContext | null, page?: Page | null, debug?: { cdpEndpoint: string } }} SessionHandles
+ * @typedef {{ browser: Browser | null, context: BrowserContext, page: Page, debug?: { cdpEndpoint: string }, success: true }} SessionSuccess
+ * @typedef {ErrorResult | SessionSuccess} SessionResult
+ * @typedef {{ success: true, sessionValid: true, inboxMessageCount: number, messages: MessagePreview[] }} InboxMessagesSuccess
+ * @typedef {ErrorResult | (ErrorResult & Partial<SessionHandles>) | InboxMessagesSuccess} InboxMessagesResult
+ * @typedef {{ success: true, sessionValid: true, message: { index: number, preview: string, subject: string, bodyText: string } }} LatestMessageSuccess
+ * @typedef {ErrorResult | LatestMessageSuccess} LatestMessageResult
+ * @typedef {{ success: true, sessionValid: true, code: string, message: LatestMessageSuccess["message"] }} OtpSuccess
+ * @typedef {ErrorResult | OtpSuccess} OtpResult
+ * @typedef {{ loaded: boolean, file: string }} RuntimeEnvResult
+ * @typedef {{ exists: boolean, storageState: StorageState | null, error: string | null }} StorageStateLoadResult
+ * @typedef {{ state: string, url: string }} NavigationState
+ * @typedef {{
+ *   headless?: boolean,
+ *   timeoutSeconds?: number,
+ *   manualLoginTimeoutSeconds?: number,
+ *   sessionFile?: string,
+ *   envFile?: string,
+ *   usernameEnv?: string,
+ *   passwordEnv?: string,
+ *   userAgent?: string,
+ *   viewport?: { width: number, height: number },
+ *   browserFactory?: BrowserFactory,
+ *   debug?: boolean | Partial<import("./debug-config.js").EnabledDebugConfig>
+ * }} BrowserClientOptions
+ * @typedef {BrowserClientOptions & {
+ *   manualFallback?: boolean,
+ *   manualTimeoutSeconds?: number,
+ *   mailUrl?: string,
+ *   folder?: string,
+ *   limit?: number,
+ *   matchText?: string | RegExp | ((message: MessagePreview) => boolean)
+ * }} BrowserActionOptions
+ */
+
 export class ProtonMailBrowserClient {
   #options;
   #envLoaded = false;
 
+  /** @param {BrowserClientOptions} [options] */
   constructor(options = {}) {
     this.#options = {
       headless: Boolean(options.headless),
@@ -44,6 +95,7 @@ export class ProtonMailBrowserClient {
     return this.#options.sessionFile;
   }
 
+  /** @returns {RuntimeEnvResult} */
   loadRuntimeEnv() {
     if (this.#envLoaded) {
       return { loaded: false, file: "" };
@@ -67,6 +119,10 @@ export class ProtonMailBrowserClient {
     return { loaded: false, file: "" };
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<LoginAndSaveSessionResult>}
+   */
   async loginAndSaveSession(options = {}) {
     this.loadRuntimeEnv();
     const mailUrl = resolveMailUrl(options);
@@ -97,12 +153,12 @@ export class ProtonMailBrowserClient {
         await dismissModals(page);
         await saveSession(context, this.#options.sessionFile);
         clearCooldown(this.#options.sessionFile);
-        return resultWithSession({
+        return resultWithSession(/** @type {LoginSuccess} */ ({
           success: true,
           loginMethod: "session",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        }, { browser, context, page, debug });
+        }), { browser, context, page, debug });
       }
 
       if (!credentials.ready) {
@@ -127,12 +183,12 @@ export class ProtonMailBrowserClient {
             { browser, context, page, debug }
           );
         }
-        return resultWithSession({
+        return resultWithSession(/** @type {LoginSuccess} */ ({
           success: true,
           loginMethod: automatic.loginMethod || "automatic",
           sessionValid: true,
           sessionFileExists: storage.exists,
-        }, { browser, context, page, debug });
+        }), { browser, context, page, debug });
       }
 
       if (!settings.manualFallback || settings.headless || automatic.manualRequired === false) {
@@ -148,21 +204,26 @@ export class ProtonMailBrowserClient {
       });
       return resultWithSession(manualResult, { browser, context, page, debug });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "";
       if (keepOpenOnError) {
         return resultWithSession(
-          resultWithError(error?.message || "Unexpected Proton Mail login failure"),
+          resultWithError(message || "Unexpected Proton Mail login failure"),
           { browser, context, page, debug }
         );
       }
-      return resultWithError(error?.message || "Unexpected Proton Mail login failure");
+      return resultWithError(message || "Unexpected Proton Mail login failure");
     } finally {
-      if (!this.#options.debug?.keepOpenOnError) {
+      if (!(this.#options.debug.enabled ? this.#options.debug.keepOpenOnError : false)) {
         await context?.close().catch(ignoreWithDebug("Failed to close browser context"));
         await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
       }
     }
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<InboxMessagesResult>}
+   */
   async getInboxMessages(options = {}) {
     this.loadRuntimeEnv();
     const session = await this.#ensureLoggedIn(options);
@@ -186,6 +247,10 @@ export class ProtonMailBrowserClient {
     }
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<LatestMessageResult>}
+   */
   async getLatestMessage(options = {}) {
     this.loadRuntimeEnv();
     const session = await this.#ensureLoggedIn(options);
@@ -226,6 +291,10 @@ export class ProtonMailBrowserClient {
     }
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<OtpResult>}
+   */
   async extractOtpCode(options = {}) {
     const matchText = options.matchText || /openai|noreply@openai\.com/i;
     const result = await this.getLatestMessage({ ...options, matchText });
@@ -248,6 +317,10 @@ export class ProtonMailBrowserClient {
     };
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<LoginAndSaveSessionResult>}
+   */
   async debugLogin(options = {}) {
     const client = new ProtonMailBrowserClient({
       sessionFile: this.#options.sessionFile,
@@ -264,6 +337,10 @@ export class ProtonMailBrowserClient {
     return client.loginAndSaveSession({ manualFallback: true });
   }
 
+  /**
+   * @param {BrowserActionOptions} [options]
+   * @returns {Promise<SessionResult>}
+   */
   async #ensureLoggedIn(options = {}) {
     const headless = options.headless ?? this.#options.headless;
     const mailUrl = resolveMailUrl(options);
@@ -283,7 +360,7 @@ export class ProtonMailBrowserClient {
 
       let navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state === "inbox") {
-        return resultWithSession({ success: true }, { browser, context, page, debug });
+        return successfulSessionResult({ browser, context, page, debug });
       }
 
       if (isExpiredSavedSession(storage, navigation)) {
@@ -356,10 +433,11 @@ export class ProtonMailBrowserClient {
         return resultWithError("Automatic login completed but target mail folder was not reachable");
       }
 
-      return resultWithSession({ success: true }, { browser, context, page, debug });
+      return successfulSessionResult({ browser, context, page, debug });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "";
       if (keepOpenOnError) {
-        return resultWithSession(resultWithError(error?.message || "Unexpected Proton Mail browser failure"), {
+        return resultWithSession(resultWithError(message || "Unexpected Proton Mail browser failure"), {
           browser,
           context,
           page,
@@ -368,7 +446,7 @@ export class ProtonMailBrowserClient {
       }
       await context?.close().catch(ignoreWithDebug("Failed to close browser context"));
       await browser?.close().catch(ignoreWithDebug("Failed to close browser"));
-      return resultWithError(error?.message || "Unexpected Proton Mail browser failure");
+      return resultWithError(message || "Unexpected Proton Mail browser failure");
     }
   }
 
@@ -378,6 +456,9 @@ export class ProtonMailBrowserClient {
     return { username, password, ready: Boolean(username && password) };
   }
 
+  /**
+   * @param {{ headless?: boolean, storageState?: StorageState | null, debug?: DebugConfig }} options
+   */
   async #launch({ headless, storageState, debug = { enabled: false } }) {
     const launchArgs = ["--disable-blink-features=AutomationControlled"];
 
@@ -403,12 +484,12 @@ export class ProtonMailBrowserClient {
 
     ensurePrivateDir(debug.profileDir);
     const persistentArgs = [...launchArgs, `--remote-debugging-port=${debug.cdpPort}`];
+    /** @type {NonNullable<Parameters<BrowserFactory["launchPersistentContext"]>[1]>} */
     const persistentOptions = {
       headless: false,
       args: persistentArgs,
       userAgent: this.#options.userAgent,
       viewport: this.#options.viewport,
-      storageState: storageState || undefined,
     };
     if (debug.slowMo > 0) {
       persistentOptions.slowMo = debug.slowMo;
@@ -434,10 +515,12 @@ export class ProtonMailBrowserClient {
   }
 }
 
+/** @param {unknown} text */
 export function extractFirstOtpCode(text) {
   return String(text || "").match(OTP_RE)?.[1] || "";
 }
 
+/** @param {unknown} preview */
 export function matchOpenAiEmail(preview) {
   return /openai|noreply@openai\.com/i.test(String(preview || ""));
 }
@@ -446,18 +529,30 @@ export function defaultSessionFile() {
   return DEFAULT_SESSION_FILE;
 }
 
+/**
+ * @param {string} message
+ * @param {unknown} error
+ * @param {Record<string, string | undefined>} [envObject]
+ */
 function debugLog(message, error, envObject = process.env) {
   if (!isDebugLoggingEnabled(envObject)) {
     return;
   }
-  const suffix = error?.message ? `: ${error.message}` : "";
+  const suffix = error instanceof Error && error.message ? `: ${error.message}` : "";
   console.warn(`[protonmail-debug] ${message}${suffix}`);
 }
 
+/** @param {Record<string, string | undefined>} [envObject] */
 function isDebugLoggingEnabled(envObject = process.env) {
   return envObject.PROTONMAIL_DEBUG === "1" || envObject.PROTONMAIL_DEBUG === "true";
 }
 
+/**
+ * @template T
+ * @param {string} message
+ * @param {T} [fallback]
+ * @returns {(error: unknown) => T | undefined}
+ */
 function ignoreWithDebug(message, fallback) {
   return (error) => {
     debugLog(message, error);
@@ -465,20 +560,30 @@ function ignoreWithDebug(message, fallback) {
   };
 }
 
+/**
+ * @param {string} name
+ * @param {string} [fallback]
+ */
 function env(name, fallback = "") {
   const value = process.env[name];
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ */
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** @param {unknown} filePath */
 function normalizePath(filePath) {
   return filePath ? path.resolve(String(filePath)) : "";
 }
 
+/** @param {unknown} filePath */
 function normalizeAbsolutePath(filePath) {
   if (!filePath) {
     return "";
@@ -487,6 +592,7 @@ function normalizeAbsolutePath(filePath) {
   return path.isAbsolute(candidate) ? path.resolve(candidate) : "";
 }
 
+/** @param {string} dirPath */
 function ensureDir(dirPath) {
   if (!dirPath) {
     return;
@@ -494,6 +600,7 @@ function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+/** @param {string} dirPath */
 function ensurePrivateDir(dirPath) {
   ensureDir(dirPath);
   try {
@@ -503,6 +610,7 @@ function ensurePrivateDir(dirPath) {
   }
 }
 
+/** @param {string} filePath */
 function loadEnvFile(filePath) {
   const trustedPath = normalizeAbsolutePath(filePath);
   if (!trustedPath || !fs.existsSync(trustedPath)) {
@@ -528,6 +636,10 @@ function loadEnvFile(filePath) {
   return true;
 }
 
+/**
+ * @param {string} sessionFile
+ * @returns {StorageStateLoadResult}
+ */
 function loadStorageState(sessionFile) {
   if (!fs.existsSync(sessionFile)) {
     return { exists: false, storageState: null, error: null };
@@ -542,19 +654,25 @@ function loadStorageState(sessionFile) {
     return {
       exists: true,
       storageState: null,
-      error: error?.message || "Session file unreadable",
+      error: error instanceof Error ? error.message : "Session file unreadable",
     };
   }
 }
 
+/**
+ * @param {StorageStateLoadResult} storage
+ * @param {NavigationState} navigation
+ */
 function isExpiredSavedSession(storage, navigation) {
   return Boolean(storage?.exists && storage.storageState && navigation?.state === "login");
 }
 
+/** @param {string} sessionFile */
 function cooldownFile(sessionFile) {
   return path.join(path.dirname(sessionFile), "protonmail-login-cooldown.json");
 }
 
+/** @param {string} sessionFile */
 function getCooldownState(sessionFile) {
   const filePath = cooldownFile(sessionFile);
   if (!fs.existsSync(filePath)) {
@@ -573,11 +691,16 @@ function getCooldownState(sessionFile) {
   }
 }
 
+/**
+ * @param {string} sessionFile
+ * @param {string} reason
+ */
 function writeCooldown(sessionFile, reason) {
   const filePath = cooldownFile(sessionFile);
   writePrivateJsonFile(filePath, { lastFailedAt: new Date().toISOString(), reason });
 }
 
+/** @param {string} sessionFile */
 function clearCooldown(sessionFile) {
   const filePath = cooldownFile(sessionFile);
   if (fs.existsSync(filePath)) {
@@ -585,8 +708,13 @@ function clearCooldown(sessionFile) {
   }
 }
 
+/**
+ * @param {string | Error} error
+ * @param {Record<string, unknown>} [extra]
+ * @returns {ErrorResult}
+ */
 function resultWithError(error, extra = {}) {
-  if (error instanceof Error) {
+  if (error instanceof ApiError) {
     return {
       success: false,
       error: error.message,
@@ -597,9 +725,21 @@ function resultWithError(error, extra = {}) {
       ...extra,
     };
   }
+  if (error instanceof Error) {
+    return {
+      success: false,
+      error: error.message,
+      errorName: error.name,
+      ...extra,
+    };
+  }
   return { success: false, error, ...extra };
 }
 
+/**
+ * @param {Record<string, unknown>} [details]
+ * @returns {ErrorResult}
+ */
 function sessionExpiredResult(details = {}) {
   return resultWithError(new SessionExpiredError("Saved Proton Mail session expired; refresh the session file", details), {
     sessionExpired: true,
@@ -607,6 +747,12 @@ function sessionExpiredResult(details = {}) {
   });
 }
 
+/**
+ * @template {Record<string, unknown>} T
+ * @param {T} result
+ * @param {{ browser?: Browser | null, context?: BrowserContext | null, page?: Page | null, debug?: DebugConfig }} handles
+ * @returns {T & SessionHandles}
+ */
 function resultWithSession(result, { browser, context, page, debug }) {
   if (!debug?.enabled) {
     return { ...result, browser, context, page };
@@ -620,19 +766,43 @@ function resultWithSession(result, { browser, context, page, debug }) {
   };
 }
 
+/**
+ * @param {{ browser: Browser | null, context: BrowserContext, page: Page, debug?: DebugConfig }} handles
+ * @returns {SessionSuccess}
+ */
+function successfulSessionResult({ browser, context, page, debug }) {
+  if (!debug?.enabled) {
+    return { success: true, browser, context, page };
+  }
+  return {
+    success: true,
+    browser,
+    context,
+    page,
+    debug: { cdpEndpoint: `http://127.0.0.1:${debug.cdpPort}` },
+  };
+}
+
+/** @param {number} ms */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** @param {unknown} value */
 function normalizeText(value) {
   return String(value || "").replace(/\s+/gu, " ").trim();
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} [max]
+ */
 function truncate(value, max = 200) {
   const text = normalizeText(value);
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+/** @param {Page} page */
 async function hasAuthChallenge(page) {
   const currentUrl = page.url();
   if (/\/(captcha|human-verification|security-check)(\/|$|[?#])/iu.test(currentUrl)) {
@@ -667,10 +837,12 @@ async function hasAuthChallenge(page) {
   return hasAuthChallengeText(await getVisiblePageText(page));
 }
 
+/** @param {unknown} content */
 function hasAuthChallengeText(content) {
   return AUTH_CHALLENGE_TEXT_RE.test(normalizeText(content));
 }
 
+/** @param {Page} page */
 async function getVisiblePageText(page) {
   try {
     return await page.locator("body").innerText({ timeout: 1000 });
@@ -680,11 +852,19 @@ async function getVisiblePageText(page) {
   }
 }
 
+/**
+ * @param {Pick<BrowserContext, "storageState">} context
+ * @param {string} sessionFile
+ */
 async function saveSession(context, sessionFile) {
   const storageState = await context.storageState();
   writePrivateJsonFile(sessionFile, storageState);
 }
 
+/**
+ * @param {string} filePath
+ * @param {unknown} value
+ */
 function writePrivateJsonFile(filePath, value) {
   ensurePrivateDir(path.dirname(filePath));
   const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
@@ -696,11 +876,14 @@ function writePrivateJsonFile(filePath, value) {
       if (fs.existsSync(tempFile)) {
         fs.unlinkSync(tempFile);
       }
-    } catch {}
+    } catch (cleanupError) {
+      debugLog(`Failed to remove temporary private JSON file ${tempFile}`, cleanupError);
+    }
     throw error;
   }
 }
 
+/** @param {{ mailUrl?: string, folder?: string }} [options] */
 function resolveMailUrl(options = {}) {
   const explicitMailUrl = typeof options.mailUrl === "string" ? options.mailUrl.trim() : "";
   if (explicitMailUrl) {
@@ -713,15 +896,21 @@ function resolveMailUrl(options = {}) {
   return INBOX_URL;
 }
 
+/** @param {unknown} url */
 function isInboxUrl(url) {
   return String(url || "").includes("/inbox");
 }
 
+/**
+ * @param {Page} page
+ * @param {string} [url]
+ */
 async function navigateToInbox(page, url = INBOX_URL) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
   return waitForInboxOrLogin(page, 15000);
 }
 
+/** @param {Page} page */
 async function hasInboxIndicators(page) {
   for (const selector of [MESSAGE_ROW_SELECTOR, '[data-testid*="compose"]', '[data-testid*="navigation-link:inbox"]']) {
     try {
@@ -735,6 +924,7 @@ async function hasInboxIndicators(page) {
   return false;
 }
 
+/** @param {Page} page */
 async function getPageContent(page) {
   try {
     return await page.content();
@@ -744,6 +934,10 @@ async function getPageContent(page) {
   }
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ */
 async function locateLoginEmailField(page, timeout = 15000) {
   const candidates = [
     page.getByRole("textbox", { name: /email|e-mail|benutzername/i }).first(),
@@ -760,6 +954,10 @@ async function locateLoginEmailField(page, timeout = 15000) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ */
 async function locateLoginPasswordField(page, timeout = 10000) {
   const candidates = [
     page.getByRole("textbox", { name: /password|passwort/i }).first(),
@@ -776,6 +974,10 @@ async function locateLoginPasswordField(page, timeout = 10000) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ */
 async function locateSignInButton(page, timeout = 10000) {
   const candidates = [
     page.getByRole("button", { name: /sign in|anmelden/i }).first(),
@@ -792,6 +994,7 @@ async function locateSignInButton(page, timeout = 10000) {
   return null;
 }
 
+/** @param {Page} page */
 async function locateStaySignedInCheckbox(page) {
   const candidates = [
     page.getByRole("checkbox", { name: /keep me signed in|angemeldet bleiben/i }).first(),
@@ -809,6 +1012,10 @@ async function locateStaySignedInCheckbox(page) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} timeoutMs
+ */
 async function waitForInboxOrLogin(page, timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -832,9 +1039,11 @@ async function waitForInboxOrLogin(page, timeoutMs) {
   return { state: "unknown", url: page.url() };
 }
 
+/** @param {Page} page */
 async function getAlertTexts(page) {
   const alerts = page.locator('[role="alert"]');
   const count = await alerts.count();
+  /** @type {string[]} */
   const texts = [];
   for (let index = 0; index < count; index += 1) {
     try {
@@ -849,6 +1058,7 @@ async function getAlertTexts(page) {
   return texts;
 }
 
+/** @param {Page} page */
 async function dismissModals(page) {
   const modalSelector = '[data-testid*="modal"], [role="dialog"], .modal, .modal-two';
   let dismissed = false;
@@ -864,7 +1074,15 @@ async function dismissModals(page) {
           const text = String(node.textContent || node.getAttribute("aria-label") || "").toLowerCase().trim();
           if (!text) continue;
           if (["close", "dismiss", "not now", "later", "cancel", "schließen", "später", "got it", "accept"].some((term) => text.includes(term))) {
-            node.click();
+            if (node instanceof HTMLElement) {
+              node.click();
+            } else {
+              if ("click" in node && typeof node.click === "function") {
+        node.click();
+        return;
+      }
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            }
             return true;
           }
         }
@@ -881,6 +1099,7 @@ async function dismissModals(page) {
   return dismissed;
 }
 
+/** @param {Page} page */
 async function completeAppsPageIfNeeded(page) {
   if (!page.url().includes("account.proton.me/apps")) {
     return false;
@@ -903,6 +1122,10 @@ async function completeAppsPageIfNeeded(page) {
   return false;
 }
 
+/**
+ * @param {{ page: Page, context: BrowserContext, username: string, password: string, sessionFile: string, suppressCooldown?: boolean }} options
+ * @returns {Promise<LoginResult>}
+ */
 async function performLogin({ page, context, username, password, sessionFile, suppressCooldown = false }) {
   if (!page.url().includes("account.proton.me")) {
     await page.goto(MAIL_HOME_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -983,6 +1206,10 @@ async function performLogin({ page, context, username, password, sessionFile, su
   return resultWithError("Automatic login timed out", { manualRequired: true });
 }
 
+/**
+ * @param {{ page: Page, context: BrowserContext, mailUrl?: string, sessionFile: string, timeoutSeconds: number }} options
+ * @returns {Promise<LoginResult>}
+ */
 async function waitForManualLoginCompletion({ page, context, mailUrl = INBOX_URL, sessionFile, timeoutSeconds }) {
   const startedAt = Date.now();
   const timeoutMs = Math.max(5, timeoutSeconds) * 1000;
@@ -1003,6 +1230,10 @@ async function waitForManualLoginCompletion({ page, context, mailUrl = INBOX_URL
   return resultWithError("Manual login did not reach inbox before timeout", { manualRequired: true, timedOut: true });
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [limit]
+ */
 async function scanInbox(page, limit = 50) {
   await page.waitForSelector('[data-testid="message-list-loaded"]', { timeout: 10000 }).catch(ignoreWithDebug("Message list loaded marker did not appear"));
   let rows = page.locator(MESSAGE_ROW_SELECTOR);
@@ -1018,6 +1249,7 @@ async function scanInbox(page, limit = 50) {
     attempts += 1;
   }
 
+  /** @type {MessagePreview[]} */
   const messages = [];
   for (let index = 0; index < Math.min(count, limit); index += 1) {
     try {
@@ -1029,6 +1261,11 @@ async function scanInbox(page, limit = 50) {
   return { inboxMessageCount: count, messages };
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [limit]
+ * @param {string} [mailUrl]
+ */
 async function scanInboxWithFallback(page, limit = 50, mailUrl = INBOX_URL) {
   const scan = await scanInbox(page, limit);
   if (scan.inboxMessageCount > 0 || mailUrl === MAIL_ALL_URL || !isInboxUrl(page.url())) {
@@ -1044,6 +1281,10 @@ async function scanInboxWithFallback(page, limit = 50, mailUrl = INBOX_URL) {
   return scanInbox(page, limit);
 }
 
+/**
+ * @param {MessagePreview[]} messages
+ * @param {BrowserActionOptions["matchText"]} matchText
+ */
 function findMatchingMessage(messages, matchText) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null;
@@ -1066,6 +1307,10 @@ function findMatchingMessage(messages, matchText) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} index
+ */
 async function openMessage(page, index) {
   const locator = page.locator(MESSAGE_ROW_SELECTOR).nth(index);
   await locator.scrollIntoViewIfNeeded().catch(ignoreWithDebug(`Failed to scroll message row ${index} into view`));
@@ -1073,11 +1318,17 @@ async function openMessage(page, index) {
     await locator.click({ timeout: 5000 });
   } catch (error) {
     debugLog(`Timed click failed for message row ${index}; trying DOM click`, error);
-    await locator.evaluate((node) => node.click()).catch(ignoreWithDebug(`DOM click failed for message row ${index}`));
+    await locator.evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }).catch(ignoreWithDebug(`DOM click failed for message row ${index}`));
   }
   await page.waitForSelector('[data-testid="content-iframe"]', { timeout: 10000 });
 }
 
+/**
+ * @param {Page} page
+ * @param {string} fallback
+ */
 async function getOpenedMessageSubject(page, fallback) {
   for (const candidate of [page.locator('[data-testid*="subject"]').first(), page.locator('[role="region"] h1').first(), page.locator("h1").first()]) {
     try {
@@ -1092,6 +1343,7 @@ async function getOpenedMessageSubject(page, fallback) {
   return truncate(fallback, 120);
 }
 
+/** @param {Frame} frame */
 async function expandOriginalMessageIfNeeded(frame) {
   const trigger = frame.locator('[data-testid="message-view:expand-codeblock"]').first();
   try {
@@ -1104,6 +1356,11 @@ async function expandOriginalMessageIfNeeded(frame) {
   }
 }
 
+/**
+ * @param {Page} page
+ * @param {string} fallbackPreview
+ * @returns {Promise<ExtractMessageResult>}
+ */
 async function extractOpenedMessage(page, fallbackPreview) {
   const iframeHandle = await page.$('[data-testid="content-iframe"]');
   if (!iframeHandle) {
