@@ -16,3 +16,12 @@ export class ApiError extends Error {
     this.details = details;
   }
 }
+
+export class RateLimitError extends ApiError {
+  constructor(message, details = {}) {
+    super(429, "RATE_LIMITED", message, details);
+    this.name = "RateLimitError";
+    this.retryAfter = details.retryAfter ?? null;
+    this.retryAfterMs = details.retryAfterMs ?? null;
+  }
+}
