@@ -222,13 +222,13 @@ bin/
 
 ## Debug Mode
 
-For troubleshooting login failures, CAPTCHA issues, or selector problems, use the built-in debug mode:
+For troubleshooting login failures, CAPTCHA issues, selector problems, or cooldown lockouts, use the built-in debug mode:
 
 ```bash
 PROTONMAIL_DEBUG=1 node scripts/debug-login.mjs
 ```
 
-This opens a headful Chromium browser with CDP enabled, keeps it open on failure, and suppresses cooldown writes. See [DEBUG.md](DEBUG.md) for full documentation including Playwright MCP attach instructions.
+This opens a headful Chromium browser with CDP enabled, keeps it open on failure, and suppresses cooldown writes. See [DEBUG.md](DEBUG.md) for full debug-mode documentation and [docs/troubleshooting.md](docs/troubleshooting.md) for CAPTCHA, selector drift, cooldown reset, and bug-report runbooks.
 
 ## CI/CD
 
