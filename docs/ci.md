@@ -21,6 +21,12 @@ pnpm ci:offline
 
 These gates must not require Proton credentials, a browser login, Proton Bridge, or network access beyond dependency installation.
 
+## Releases
+
+Releases are defined in `.github/workflows/release.yml` and run on pushes to `main` or manual dispatch. The release job uses the same offline gate as pull requests before running semantic-release.
+
+This package is currently private, so release automation creates GitHub Releases with attached npm tarballs and does not publish to the npm registry. See [RELEASING.md](RELEASING.md) for the release contract and npm-publishing checklist.
+
 ## Live Proton Regression
 
 The live workflow is defined in `.github/workflows/live-proton.yml` and runs on pull requests, schedule, or manual dispatch.
@@ -82,13 +88,13 @@ pnpm debug:login -- --profile-dir data/debug-profile --timeout 1800
 After the session file exists, store it as a GitHub Actions secret without printing the cookie JSON. The helper minimizes the Playwright storage state to Proton cookies plus the account-origin storage needed for session reuse, so it fits within GitHub's Actions secret size limit:
 
 ```bash
-pnpm session:secret -- --repo hacker-h/protonmail-api-client
+pnpm session:secret -- --repo <owner>/<repo>
 ```
 
 You can also pass an explicit file:
 
 ```bash
-pnpm session:secret -- --repo hacker-h/protonmail-api-client --session-file data/protonmail-auth.json
+pnpm session:secret -- --repo <owner>/<repo> --session-file data/protonmail-auth.json
 ```
 
 Do not put session JSON in Actions cache, artifacts, issues, PR comments, or logs. It is secret-bearing browser state.
@@ -103,7 +109,7 @@ Live failures should be triaged into one of these categories:
 - auth challenge: CAPTCHA, 2FA, account lock, or risk challenge
 - infrastructure: missing secrets, browser install, GitHub runner failure
 
-Do not make scheduled live tests required for external contributor PRs. They depend on private secrets and Proton-side behavior. Keep offline gates required; use live failures to open follow-up issues with redacted diagnostics.
+Do not make live tests required for external contributor PRs. They depend on private secrets and Proton-side behavior. Keep offline gates required; use live failures to open follow-up issues with redacted diagnostics.
 
 ## Secret Safety
 
