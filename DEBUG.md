@@ -2,7 +2,7 @@
 
 ## Why Debug Mode Exists
 
-`protonmail-api-client` uses a headless Playwright browser to log into Proton Mail and read emails. When login fails (CAPTCHA, 2FA/TOTP, wrong credentials, selector changes), the browser closes immediately and a 5-minute cooldown is written, making it impossible to inspect what went wrong.
+`proton-mail-cli` uses a headless Playwright browser to log into Proton Mail and read emails. When login fails (CAPTCHA, 2FA/TOTP, wrong credentials, selector changes), the browser closes immediately and a 5-minute cooldown is written, making it impossible to inspect what went wrong.
 
 Debug mode fixes this by:
 - Forcing headful (visible) browser
