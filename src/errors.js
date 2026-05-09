@@ -25,3 +25,10 @@ export class RateLimitError extends ApiError {
     this.retryAfterMs = details.retryAfterMs ?? null;
   }
 }
+
+export class SessionExpiredError extends ApiError {
+  constructor(message = "Saved Proton Mail session expired", details = {}) {
+    super(401, "SESSION_EXPIRED", message, details);
+    this.name = "SessionExpiredError";
+  }
+}
