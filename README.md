@@ -62,6 +62,8 @@ JSON output uses a single envelope convention for follow-up commands:
 
 JSON errors keep the same shape with `ok: false`, `data: null`, and a stable `error.code` plus human-readable `error.message`. Success output goes to stdout. Errors, including JSON envelopes for failed commands, go to stderr.
 
+Future CLI command PRs should follow the shared contract in [docs/conventions.md](docs/conventions.md).
+
 Exit codes:
 
 | Code | Meaning |
@@ -75,19 +77,7 @@ Exit codes:
 
 Configuration resolves in this order: CLI flags, environment variables, JSON config file, then OS defaults. The default config file is `~/Library/Application Support/proton-mail-cli/config.json` on macOS, `$XDG_CONFIG_HOME/proton-mail-cli/config.json` on Linux when set, or `~/.config/proton-mail-cli/config.json`. The default browser session file is stored under the user cache directory, not repo-local `data/`.
 
-Supported environment variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `PROTONMAIL_CONFIG_FILE` | Config JSON path when `--config` is not provided. |
-| `PROTONMAIL_SESSION_FILE` | Browser storage-state/session path when `--session` is not provided. |
-| `PROTONMAIL_TIMEOUT_SECONDS` | Positive integer timeout for injected clients. |
-| `PROTONMAIL_USERNAME` | Proton username. |
-| `PROTONMAIL_USERNAME_FILE` | File containing the Proton username. |
-| `PROTONMAIL_USERNAME_COMMAND` | Command that prints the Proton username. |
-| `PROTONMAIL_PASSWORD` | Proton password. |
-| `PROTONMAIL_PASSWORD_FILE` | File containing the Proton password. |
-| `PROTONMAIL_PASSWORD_COMMAND` | Command that prints the Proton password. |
+Supported variables are documented in [Environment Variables](#environment-variables).
 
 Secret precedence is direct env var, then `*_FILE`, then `*_COMMAND`. Doctor output reports whether secrets are configured and where they came from, but never prints secret values.
 
@@ -283,10 +273,16 @@ Notes:
 
 | Variable | Purpose | Secret | Values / Defaults | Used by |
 |---|---|---:|---|---|
+| `PROTONMAIL_CONFIG_FILE` | Config JSON path when `--config` is not provided | No | Default: OS config path | `src/config.js`, README CLI examples |
 | `PROTONMAIL_USERNAME` | Proton test account username for fresh login | Yes | Required for credential login; typically an email address; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_USERNAME_FILE` | File containing the Proton username | Yes | Used when direct username env is unset | `src/config.js` secret resolution |
+| `PROTONMAIL_USERNAME_COMMAND` | Command that prints the Proton username | Yes | Used when direct and file username sources are unset | `src/config.js` secret resolution |
 | `PROTONMAIL_PASSWORD` | Proton test account password for fresh login | Yes | Required for credential login; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_PASSWORD_FILE` | File containing the Proton password | Yes | Used when direct password env is unset | `src/config.js` secret resolution |
+| `PROTONMAIL_PASSWORD_COMMAND` | Command that prints the Proton password | Yes | Used when direct and file password sources are unset | `src/config.js` secret resolution |
 | `PROTONMAIL_ENV_FILE` | Absolute path to an env file containing credentials | No | Default: unset; if unset, tries `./env.env` then `./.env` | `src/browser-client.js`, `scripts/debug-login.mjs` |
 | `PROTONMAIL_SESSION_FILE` | Override path to the Playwright session JSON file for scripts | No | Default (script behavior): `data/protonmail-auth.json` | `scripts/capture-session.mjs`, `scripts/debug-login.mjs`, `scripts/set-session-secret.mjs` |
+| `PROTONMAIL_TIMEOUT_SECONDS` | Positive integer timeout for injected CLI clients | No | Default: command-specific or unset | `src/config.js`, CLI tests |
 | `PROTONMAIL_SESSION_JSON` | Seed session JSON (minimized Playwright storage state) for CI/live tests | Yes | Default: unset; when set, CI writes it to an isolated session file before running live tests | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md`, `scripts/capture-session.mjs`, `scripts/set-session-secret.mjs`, `DEBUG.md` |
 | `PROTONMAIL_SESSION_CACHE_KEY` | Encryption key for short-lived cached session payloads (`.ci-proton/session.enc`) | Yes | Default: unset; when unset, workflow skips saving cache; if a cache exists, decryption requires this key. Recommended: ≥32 random bytes (see `SECURITY.md`) | `.github/workflows/live-proton.yml`, `scripts/session-cache.mjs`, `docs/ci.md` |
 | `PROTONMAIL_LIVE_TEST` | Enable live Proton regression tests | No | `1` enables; default is disabled (`0`/unset) | `package.json` (`pnpm test:live`), `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
@@ -297,6 +293,8 @@ Notes:
 | `PROTONMAIL_DEBUG_CDP_PORT` | Override Chrome DevTools Protocol port in debug mode | No | Default `9222` | `src/debug-config.js`, `scripts/debug-login.mjs`, `DEBUG.md` |
 | `PROTONMAIL_DEBUG_PROFILE_DIR` | Override the debug browser profile directory | No | Default `<repo>/data/debug-profile` | `src/debug-config.js`, `scripts/debug-login.mjs`, `scripts/capture-session.mjs`, `DEBUG.md` |
 | `PROTONMAIL_DEBUG_CHROMIUM` | Override Chromium executable path for debug runs | No | Default: auto (Playwright-managed Chromium unless overridden) | `src/debug-config.js`, `scripts/debug-login.mjs`, `DEBUG.md` |
+| `PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS` | Override manual debug/login wait timeout | No | Default: debug config default | `src/debug-config.js`, debug config tests |
+| `PROTONMAIL_DEBUG_TIMEOUT_SECONDS` | Legacy manual debug/login wait timeout override | No | Default: unset; superseded by `PROTONMAIL_DEBUG_MANUAL_TIMEOUT_SECONDS` | `src/debug-config.js` |
 
 ## CI/CD
 

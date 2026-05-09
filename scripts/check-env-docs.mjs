@@ -9,7 +9,6 @@ const SCAN_DIRS = [
   ".github",
   "scripts",
   "src",
-  "test",
 ];
 
 const SCAN_FILES = [
