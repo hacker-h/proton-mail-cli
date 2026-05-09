@@ -22,10 +22,11 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "ci:offline": "pnpm typecheck && pnpm test:unit && npm pack --dry-run",
+    "ci:offline": "pnpm typecheck && pnpm test:unit && pnpm test:package && npm pack --dry-run",
     "release:dry-run": "semantic-release --dry-run --no-ci",
     "test": "pnpm test:unit",
     "test:unit": "node --test \"test/*.test.js\"",
+    "test:package": "node --test \"test/package/*.test.js\"",
     "test:live": "PROTONMAIL_LIVE_TEST=1 node --test \"test/live/**/*.test.js\"",
     "typecheck": "tsc --noEmit",
     "env:check": "node scripts/check-env-docs.mjs",
