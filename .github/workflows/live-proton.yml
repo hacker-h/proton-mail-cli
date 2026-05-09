@@ -81,7 +81,7 @@ jobs:
 
       - name: Restore encrypted branch session cache
         id: restore-session
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ci-proton/session.enc
           key: proton-session-${{ steps.session-key.outputs.branch }}-${{ steps.session-key.outputs.bucket }}
@@ -159,7 +159,7 @@ jobs:
 
       - name: Save 6-hour branch session cache
         if: success() && steps.restore-session.outputs.cache-hit != 'true' && hashFiles('.ci-proton/session.enc') != ''
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .ci-proton/session.enc
           key: proton-session-${{ steps.session-key.outputs.branch }}-${{ steps.session-key.outputs.bucket }}
