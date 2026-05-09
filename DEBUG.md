@@ -11,6 +11,10 @@ Debug mode fixes this by:
 - Suppressing cooldown writes
 - Using an isolated profile directory (never touches your main browser)
 
+For operator runbooks covering CAPTCHA/human verification, selector drift,
+cooldown lockout reset, and bug-report contents, see
+[docs/troubleshooting.md](docs/troubleshooting.md).
+
 ## How to Enable
 
 ### Environment variable (recommended for CLI use):
