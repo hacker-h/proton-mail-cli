@@ -7,9 +7,10 @@ import { ProtonMailBrowserClient } from "../../src/index.js";
 
 const liveEnabled = process.env.PROTONMAIL_LIVE_TEST === "1";
 const hasSeededSession = Boolean(process.env.PROTONMAIL_SESSION_JSON);
+const hasConfiguredSessionFile = Boolean(process.env.PROTONMAIL_LIVE_SESSION_FILE && fs.existsSync(process.env.PROTONMAIL_LIVE_SESSION_FILE));
 const hasCredentials = Boolean(process.env.PROTONMAIL_USERNAME && process.env.PROTONMAIL_PASSWORD);
 const freshLoginAllowed = process.env.PROTONMAIL_ALLOW_FRESH_LOGIN === "1";
-const shouldRun = liveEnabled && (hasSeededSession || (hasCredentials && freshLoginAllowed));
+const shouldRun = liveEnabled && (hasSeededSession || hasConfiguredSessionFile || (hasCredentials && freshLoginAllowed));
 const testOptions = shouldRun ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 with PROTONMAIL_SESSION_JSON, or explicitly allow fresh login with credentials" };
 
 let tmpDir = "";
@@ -53,7 +54,7 @@ describe("live Proton login", testOptions, () => {
     assert.equal(login.success, true, formatLiveFailure(login));
     assert.equal(login.sessionValid, true);
     assert.equal(fs.existsSync(sessionFile), true);
-    if (seededSession) {
+    if (seededSession || configuredSessionFile) {
       assert.equal(login.loginMethod, "session", "Seeded CI sessions must be reused without credential login");
     }
 
