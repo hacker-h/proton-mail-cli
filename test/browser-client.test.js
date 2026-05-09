@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { ProtonMailBrowserClient, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "../src/index.js";
 import { __internal } from "../src/browser-client.js";
@@ -37,5 +40,61 @@ describe("ProtonMailBrowserClient exports", () => {
   it("classifies visible human-verification wording as an auth challenge", () => {
     assert.equal(__internal.hasAuthChallengeText("Please verify that you are human"), true);
     assert.equal(__internal.hasAuthChallengeText("Complete this security check"), true);
+  });
+
+  it("writes cooldown files with private permissions at creation time", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-cooldown-"));
+    const sessionFile = path.join(tmpDir, "session.json");
+    const originalWriteFileSync = fs.writeFileSync;
+    const calls = [];
+
+    fs.writeFileSync = (...args) => {
+      calls.push(args);
+      return originalWriteFileSync(...args);
+    };
+
+    try {
+      __internal.writeCooldown(sessionFile, "Login failed");
+    } finally {
+      fs.writeFileSync = originalWriteFileSync;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+
+    const writeCall = calls.find(([filePath]) => filePath.endsWith("protonmail-login-cooldown.json"));
+    assert.ok(writeCall);
+    assert.deepEqual(writeCall[2], { encoding: "utf8", mode: 0o600 });
+  });
+
+  it("writes saved browser sessions with private permissions at creation time", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-session-"));
+    const sessionFile = path.join(tmpDir, "session.json");
+    const storageState = { cookies: [], origins: [] };
+    const storageStateCalls = [];
+    const context = {
+      async storageState(...args) {
+        storageStateCalls.push(args);
+        return storageState;
+      },
+    };
+    const originalWriteFileSync = fs.writeFileSync;
+    const calls = [];
+
+    fs.writeFileSync = (...args) => {
+      calls.push(args);
+      return originalWriteFileSync(...args);
+    };
+
+    try {
+      await __internal.saveSession(context, sessionFile);
+    } finally {
+      fs.writeFileSync = originalWriteFileSync;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+
+    assert.deepEqual(storageStateCalls, [[]]);
+    const writeCall = calls.find(([filePath]) => filePath === sessionFile);
+    assert.ok(writeCall);
+    assert.deepEqual(JSON.parse(writeCall[1]), storageState);
+    assert.deepEqual(writeCall[2], { encoding: "utf8", mode: 0o600 });
   });
 });
