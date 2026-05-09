@@ -79,6 +79,100 @@ Do not cache raw session JSON. The workflow only caches `.ci-proton/session.enc`
 
 Dependabot live-login coverage uses Dependabot-scoped secrets with the same names as the Actions secrets. Keep these secrets limited to the dedicated Proton test account and rotate them if a dependency update or workflow log ever exposes session state.
 
+## Proactive Session Refresh
+
+For scheduled CI, refresh session state before jobs depend on it rather than waiting for a bot run to discover expiry.
+
+Recommended cadence:
+
+- run a scheduled refresh inside each six-hour cache bucket, or immediately before the live workflow batch
+- use the dedicated Proton test account only
+- write the refreshed Playwright storage state to a temporary file, then update `PROTONMAIL_SESSION_JSON`
+- never print the session JSON, cookies, refresh payloads, or full account address
+
+Local refresh recipe:
+
+```bash
+PROTONMAIL_USERNAME='test-account@example.com' \
+PROTONMAIL_PASSWORD='...' \
+PROTONMAIL_SESSION_FILE="$(pwd)/data/protonmail-auth.json" \
+node --input-type=module <<'EOF'
+import { ProtonMailBrowserClient, defaultSessionFile } from "./src/index.js";
+
+const client = new ProtonMailBrowserClient({
+  headless: true,
+  sessionFile: process.env.PROTONMAIL_SESSION_FILE || defaultSessionFile(),
+});
+const result = await client.loginAndSaveSession({ headless: true, manualFallback: false });
+await result.context?.close().catch(() => {});
+await result.browser?.close().catch(() => {});
+if (!result.success) {
+  console.error(result.error || "Session refresh failed");
+  process.exit(1);
+}
+EOF
+
+pnpm session:secret -- --repo <owner>/<repo> --session-file data/protonmail-auth.json
+```
+
+If this returns `SESSION_EXPIRED` from a read path, run the same refresh before retrying the bot task. If refresh returns `captcha: true`, `twoFactor: true`, or `manualRequired: true`, stop the unattended run and recapture the session headfully:
+
+```bash
+PROTONMAIL_USERNAME='test-account@example.com' \
+PROTONMAIL_PASSWORD='...' \
+pnpm debug:login -- --profile-dir data/debug-profile --timeout 1800
+pnpm session:secret -- --repo <owner>/<repo> --session-file data/protonmail-auth.json
+```
+
+GitHub Actions schedule sketch:
+
+```yaml
+on:
+  schedule:
+    - cron: "10 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh-proton-session:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium
+      - name: Refresh session
+        env:
+          PROTONMAIL_USERNAME: ${{ secrets.PROTONMAIL_USERNAME }}
+          PROTONMAIL_PASSWORD: ${{ secrets.PROTONMAIL_PASSWORD }}
+          PROTONMAIL_SESSION_FILE: data/protonmail-auth.json
+        run: |
+          node --input-type=module <<'EOF'
+          import { ProtonMailBrowserClient } from "./src/index.js";
+
+          const client = new ProtonMailBrowserClient({
+            headless: true,
+            sessionFile: process.env.PROTONMAIL_SESSION_FILE,
+          });
+          const result = await client.loginAndSaveSession({ headless: true, manualFallback: false });
+          await result.context?.close().catch(() => {});
+          await result.browser?.close().catch(() => {});
+          if (!result.success) {
+            console.error(result.error || "Session refresh failed");
+            process.exit(1);
+          }
+          EOF
+      - name: Update session secret
+        env:
+          GH_TOKEN: ${{ secrets.SESSION_SECRET_ROTATION_TOKEN }}
+        run: pnpm session:secret -- --repo "$GITHUB_REPOSITORY"
+```
+
+Use a fine-scoped token for `SESSION_SECRET_ROTATION_TOKEN` that can update Actions secrets in this repository. Do not use this refresh job for forked pull requests.
+
 ## Capturing a Keep-Logged-In Session
 
 Capture the session locally in a headful browser, complete any CAPTCHA or account challenge manually, and leave Proton's stay-signed-in option enabled:

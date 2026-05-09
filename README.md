@@ -62,6 +62,7 @@ if (otp.success) {
 - For accounts with 2FA, run a headful/manual capture once, complete the challenge in the browser, and reuse the saved session file for automation.
 - `envFile` should be an absolute path to a trusted credentials file when used.
 - Session files contain secret-bearing browser state and should stay untracked.
+- Saved sessions are reusable but not permanent. For long-running bots, treat `SessionExpiredError` or result code `SESSION_EXPIRED` as the signal to rotate the session file before retrying work.
 
 ## REST/API Usage
 
@@ -105,7 +106,7 @@ Your REST/API session store must implement at minimum:
 }
 ```
 
-See [docs/session-store.md](docs/session-store.md) for the full method contract, stored-session schema, default browser session-file behavior, and a runnable in-memory reference implementation.
+See [docs/session-store.md](docs/session-store.md) for the full method contract, stored-session schema, browser session expiry signal, rotation strategy, and a runnable in-memory reference implementation.
 
 ## Implemented
 

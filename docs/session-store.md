@@ -37,6 +37,79 @@ Optional methods:
 - Store backend failures should throw their native error. The client wraps unexpected transport failures as upstream errors, while explicit `ApiError` instances are preserved.
 - `applySetCookieHeaders()` and `invalidate()` failures are not swallowed. If persistence fails, the caller sees the failure so automation does not continue with a stale session by accident.
 
+## Session Expiry Lifecycle
+
+Proton browser sessions are server-controlled. A captured Playwright storage-state file should be treated as a renewable credential, not a permanent login.
+
+Typical expiry triggers:
+
+- inactivity or normal Proton session TTL enforcement
+- Proton-side revocation, password change, account security event, or logout from another device
+- risk changes such as a new runner IP, datacenter, user agent, or suspicious repeated fresh-login attempts
+- browser storage-state truncation, secret corruption, or a session file restored from an old cache bucket
+
+There is no stable public Proton TTL guarantee. In CI, keep reuse windows short; this repository's live workflow uses a six-hour cache bucket and falls back to a repository session secret when a branch bucket misses. For unattended jobs, refresh before each scheduled batch or at least before the current cache bucket closes.
+
+### Browser Expiry Signal
+
+`ProtonMailBrowserClient` detects saved-session expiry when a stored session file is loaded, Proton redirects the mailbox navigation back to the login page, and no inbox indicators are visible.
+
+Browser read methods such as `getInboxMessages()`, `getLatestMessage()`, and `extractOtpCode()` return a structured failure:
+
+```js
+{
+  success: false,
+  error: "Saved Proton Mail session expired; refresh the session file",
+  errorName: "SessionExpiredError",
+  code: "SESSION_EXPIRED",
+  status: 401,
+  sessionExpired: true,
+  sessionValid: false
+}
+```
+
+This is distinct from auth challenges:
+
+- CAPTCHA/human verification returns `captcha: true` and `manualRequired: true`.
+- 2FA/TOTP returns `twoFactor: true` and `manualRequired: true`.
+- Network and Proton backend failures do not use `SESSION_EXPIRED`.
+
+The package also exports `SessionExpiredError` for callers that normalize browser results into thrown errors.
+
+### Rotation Pattern
+
+Use a two-step flow for long-lived bots:
+
+```js
+import { ProtonMailBrowserClient, SessionExpiredError } from "protonmail-api-client";
+
+const client = new ProtonMailBrowserClient({
+  headless: true,
+  sessionFile: process.env.PROTONMAIL_SESSION_FILE,
+});
+
+async function readWithRotation() {
+  const result = await client.getLatestMessage({ limit: 10 });
+  if (result.success) return result.message;
+
+  if (result.code === "SESSION_EXPIRED") {
+    const refreshed = await client.loginAndSaveSession({
+      headless: true,
+      manualFallback: false,
+    });
+    if (!refreshed.success) {
+      throw new SessionExpiredError("Session refresh failed", { refresh: refreshed });
+    }
+    const retry = await client.getLatestMessage({ limit: 10 });
+    if (retry.success) return retry.message;
+  }
+
+  throw new Error(result.error);
+}
+```
+
+Headless rotation only works while Proton accepts an automated login for the account. If Proton presents CAPTCHA, 2FA/TOTP, or another risk challenge, run a headful capture, complete the challenge manually, and persist the new session file.
+
 ## Stored Session Shape
 
 A REST store can choose Redis, S3, a secrets manager, memory, or a local file. The stored object should contain enough information to implement the methods above:
