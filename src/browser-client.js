@@ -12,7 +12,22 @@ const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const INBOX_URL = "https://mail.proton.me/u/0/inbox";
 export const MAIL_ALL_URL = "https://mail.proton.me/u/0/all-mail";
 const MAIL_HOME_URL = "https://mail.proton.me";
-const OTP_RE = /\b(\d{6})\b/;
+const OPENAI_MATCH_RE = /openai|noreply@openai\.com/i;
+const OTP_RE = /\b(?<code>\d{6})\b/u;
+const GITHUB_DEVICE_AUTH_RE = /\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\b/iu;
+const MAGIC_LINK_RE = /(?<link>https?:\/\/[^\s"'<>]+)/iu;
+export const OTP_PROVIDER_PRESETS = Object.freeze({
+  generic: Object.freeze({ otpPattern: OTP_RE }),
+  github: Object.freeze({ matchText: /github|noreply@github\.com/i, otpPattern: GITHUB_DEVICE_AUTH_RE }),
+  magicLink: Object.freeze({ linkPattern: MAGIC_LINK_RE }),
+});
+const OTP_PROVIDER_ALIASES = Object.freeze({
+  "generic-6-digit": "generic",
+  "github-device-auth": "github",
+  "magic-link": "magicLink",
+  "magic-link-url": "magicLink",
+  magiclink: "magicLink",
+});
 const AUTH_CHALLENGE_TEXT_RE = /\b(captcha|hcaptcha|human verification|verify that you are human|verify you are human|security check)\b/iu;
 const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
 const POLL_INTERVAL_MS = 5000;
@@ -226,23 +241,44 @@ export class ProtonMailBrowserClient {
   }
 
   async extractOtpCode(options = {}) {
-    const matchText = options.matchText || /openai|noreply@openai\.com/i;
+    let extractionOptions;
+
+    try {
+      extractionOptions = resolveOtpExtractionOptions(options);
+    } catch (error) {
+      return resultWithError(error?.message || "Invalid OTP extraction options");
+    }
+
+    const matchText = options.matchText ?? (extractionOptions.providerPreset ? extractionOptions.matchText : OPENAI_MATCH_RE);
     const result = await this.getLatestMessage({ ...options, matchText });
     if (!result.success) {
       return result;
     }
 
-    const code = extractFirstOtpCode(result.message.bodyText);
-    if (!code) {
-      return resultWithError("Matching email found, but no 6-digit code was present", {
+    let code;
+    let link;
+
+    try {
+      code = extractFirstOtpCode(result.message.bodyText, extractionOptions);
+      link = extractionOptions.linkPattern ? extractFirstLink(result.message.bodyText, extractionOptions) : "";
+    } catch (error) {
+      return resultWithError(error?.message || "Invalid OTP extraction pattern", {
         message: result.message,
       });
+    }
+
+    if (!code && !link) {
+      const error = extractionOptions.linkPattern
+        ? "Matching email found, but no OTP code or link was present"
+        : "Matching email found, but no 6-digit code was present";
+      return resultWithError(error, { message: result.message });
     }
 
     return {
       success: true,
       sessionValid: true,
       code,
+      ...(extractionOptions.linkPattern ? { link } : {}),
       message: result.message,
     };
   }
@@ -420,16 +456,117 @@ export class ProtonMailBrowserClient {
   }
 }
 
-export function extractFirstOtpCode(text) {
-  return String(text || "").match(OTP_RE)?.[1] || "";
+export function extractOtpCode(text, options = {}) {
+  return extractFirstOtpCode(text, options);
+}
+
+export function extractFirstOtpCode(text, options = {}) {
+  const extractionOptions = resolveOtpExtractionOptions(options);
+  return extractFirstPatternValue(text, extractionOptions.otpPattern, ["code"]);
+}
+
+export function extractFirstLink(text, options = {}) {
+  const extractionOptions = resolveOtpExtractionOptions(options);
+  const value = extractFirstPatternValue(text, extractionOptions.linkPattern || MAGIC_LINK_RE, ["link", "url"]);
+  return trimTrailingUrlPunctuation(value);
 }
 
 export function matchOpenAiEmail(preview) {
-  return /openai|noreply@openai\.com/i.test(String(preview || ""));
+  return testPattern(OPENAI_MATCH_RE, String(preview || ""));
 }
 
 export function defaultSessionFile() {
   return DEFAULT_SESSION_FILE;
+}
+
+function resolveOtpExtractionOptions(options = {}) {
+  const providerPreset = resolveProviderPreset(options.provider);
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(options, key);
+  const otpPatternInput = hasOwn("otpPattern")
+    ? options.otpPattern
+    : hasOwn("pattern")
+      ? options.pattern
+      : providerPreset?.otpPattern ?? OTP_RE;
+  const linkPatternInput = hasOwn("linkPattern") ? options.linkPattern : providerPreset?.linkPattern;
+  return {
+    providerPreset,
+    matchText: options.matchText ?? providerPreset?.matchText,
+    otpPattern: normalizeExtractionPattern(otpPatternInput),
+    linkPattern: linkPatternInput === undefined ? undefined : normalizeExtractionPattern(linkPatternInput),
+  };
+}
+
+function resolveProviderPreset(provider) {
+  if (!provider) {
+    return null;
+  }
+
+  const providerName = String(provider).trim();
+  const presetName = OTP_PROVIDER_PRESETS[providerName] ? providerName : OTP_PROVIDER_ALIASES[providerName.toLowerCase()];
+  if (!presetName || !OTP_PROVIDER_PRESETS[presetName]) {
+    throw new Error(`Unknown OTP provider preset: ${providerName}`);
+  }
+  return OTP_PROVIDER_PRESETS[presetName];
+}
+
+function normalizeExtractionPattern(pattern) {
+  if (pattern instanceof RegExp) {
+    return cloneStatelessRegExp(pattern);
+  }
+  if (typeof pattern === "string" && pattern) {
+    const trimmed = pattern.trim();
+    if (!trimmed) {
+      throw new Error("OTP extraction pattern must be a RegExp or non-empty string");
+    }
+
+    const literalMatch = /^\/([\s\S]+)\/([a-z]*)$/u.exec(trimmed);
+    if (literalMatch) {
+      const [, source, flags] = literalMatch;
+      return new RegExp(source, normalizeExtractionFlags(flags));
+    }
+
+    return new RegExp(trimmed, "u");
+  }
+  throw new Error("OTP extraction pattern must be a RegExp or non-empty string");
+}
+
+function cloneStatelessRegExp(pattern) {
+  return new RegExp(pattern.source, pattern.flags.replace(/[gy]/gu, ""));
+}
+
+function normalizeExtractionFlags(flags) {
+  const sanitized = String(flags || "")
+    .replace(/[^dgimsuvy]/gu, "")
+    .replace(/[gy]/gu, "");
+  return sanitized.includes("u") ? sanitized : `${sanitized}u`;
+}
+
+function extractFirstPatternValue(text, pattern, groupNames) {
+  const normalized = normalizeExtractionPattern(pattern);
+  const match = normalized.exec(String(text || ""));
+  if (!match) {
+    return "";
+  }
+
+  for (const groupName of groupNames) {
+    const value = match.groups?.[groupName];
+    if (value) {
+      return value;
+    }
+  }
+
+  return match[1] || match[0] || "";
+}
+
+function trimTrailingUrlPunctuation(value) {
+  let text = String(value || "");
+  const trailing = ").,;:!?]}'>\"";
+  while (text.length > 0 && trailing.includes(text.at(-1))) text = text.slice(0, -1);
+  return text;
+}
+
+function testPattern(pattern, text) {
+  return cloneStatelessRegExp(pattern).test(text);
 }
 
 function debugLog(message, error, envObject = process.env) {
@@ -1020,7 +1157,7 @@ function findMatchingMessage(messages, matchText) {
     if (typeof matchText === "string" && preview.includes(matchText)) {
       return message;
     }
-    if (matchText instanceof RegExp && matchText.test(preview)) {
+    if (matchText instanceof RegExp && testPattern(matchText, preview)) {
       return message;
     }
     if (typeof matchText === "function" && matchText(message)) {
@@ -1088,13 +1225,16 @@ async function extractOpenedMessage(page, fallbackPreview) {
 
 export const __internal = {
   defaultSessionFile: DEFAULT_SESSION_FILE,
+  extractFirstLink,
   extractFirstOtpCode,
+  extractOtpCode,
   findMatchingMessage,
   hasAuthChallengeText,
   debugLog,
   isDebugLoggingEnabled,
   MAIL_ALL_URL,
   matchOpenAiEmail,
+  OTP_PROVIDER_PRESETS,
   resolveMailUrl,
   saveSession,
   writeCooldown,
