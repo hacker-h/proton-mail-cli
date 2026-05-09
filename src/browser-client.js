@@ -2,12 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { defaultSessionFilePath } from "./config.js";
 import { resolveDebugConfig } from "./debug-config.js";
 import { SessionExpiredError } from "./errors.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DATA_DIR = path.join(ROOT_DIR, "data");
-const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
+const DEFAULT_SESSION_FILE = defaultSessionFilePath();
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const INBOX_URL = "https://mail.proton.me/u/0/inbox";
