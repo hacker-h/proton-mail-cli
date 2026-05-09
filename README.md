@@ -55,9 +55,11 @@ if (otp.success) {
 ### Browser Client Runtime Notes
 
 - Fresh automated logins can trigger Proton CAPTCHA or other human-verification challenges.
+- Accounts with 2FA/TOTP enabled require manual completion. The browser client detects Proton's 2FA/TOTP step and returns a structured failure such as `{ success: false, twoFactor: true, manualRequired: true }`; it does not generate or submit TOTP codes.
 - The durable operational model is:
   1. automatic login when Proton allows it
   2. saved-session reuse for normal programmatic runs
+- For accounts with 2FA, run a headful/manual capture once, complete the challenge in the browser, and reuse the saved session file for automation.
 - `envFile` should be an absolute path to a trusted credentials file when used.
 - Session files contain secret-bearing browser state and should stay untracked.
 
@@ -118,7 +120,7 @@ Your session store must implement at minimum:
 - REST message body decryption
 - Key management
 - Contacts
-- 2FA/TOTP during auth
+- Automated 2FA/TOTP completion during auth
 - FIDO2/WebAuthn during auth
 - Import messages
 - Undo actions
@@ -126,6 +128,8 @@ Your session store must implement at minimum:
 - Filters/Rules
 - Settings
 - Guaranteed fresh-login success when Proton presents CAPTCHA/human verification
+
+2FA/TOTP challenge detection is implemented for the browser login path. Automated 2FA/TOTP completion is intentionally unsupported; CI and other unattended jobs must use a pre-captured saved session instead of trying to solve 2FA during fresh login.
 
 ## Architecture
 

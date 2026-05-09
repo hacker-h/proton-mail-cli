@@ -49,9 +49,9 @@ The live test verifies:
 - session file creation
 - saved-session reuse without re-entering credentials
 
-If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. This is the preferred and expected scheduled-CI mode because fresh credential login may trigger Proton CAPTCHA or other risk checks.
+If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. This is the preferred and expected scheduled-CI mode because fresh credential login may trigger Proton CAPTCHA, 2FA/TOTP, or other risk checks.
 
-Scheduled CI intentionally does not perform fresh username/password login when `PROTONMAIL_SESSION_JSON` is missing. A maintainer can manually dispatch the workflow with `allow_fresh_login=true`, but that should be rare and should be treated as potentially causing Proton risk challenges.
+Scheduled CI intentionally does not perform fresh username/password login when `PROTONMAIL_SESSION_JSON` is missing. A maintainer can manually dispatch the workflow with `allow_fresh_login=true`, but that should be rare and should be treated as potentially causing Proton risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
 
 ## Pull Request Live Login Cache
 
@@ -104,7 +104,7 @@ Live failures should be triaged into one of these categories:
 - project regression: CLI/client behavior changed unexpectedly
 - Proton backend drift: API/auth behavior changed
 - Proton UI drift: selectors or mailbox UI changed
-- auth challenge: CAPTCHA, 2FA, account lock, or risk challenge
+- auth challenge: CAPTCHA, 2FA/TOTP, account lock, or risk challenge
 - infrastructure: missing secrets, browser install, GitHub runner failure
 
 Do not make scheduled live tests required for external contributor PRs. They depend on private secrets and Proton-side behavior. Keep offline gates required; use live failures to open follow-up issues with redacted diagnostics.
