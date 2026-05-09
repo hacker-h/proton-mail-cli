@@ -16,3 +16,11 @@ export class ApiError extends Error {
     this.details = details;
   }
 }
+
+export class RateLimitError extends ApiError {
+  constructor(message = "Proton rate limit retry budget exhausted", details = {}) {
+    super(429, "RATE_LIMITED", message, details);
+    this.name = "RateLimitError";
+    this.retryAfter = details.retryAfter ?? null;
+  }
+}
