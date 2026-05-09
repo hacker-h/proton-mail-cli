@@ -81,6 +81,11 @@ export function resolveDebugConfig(options, env) {
   };
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ * @returns {number}
+ */
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;

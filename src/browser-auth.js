@@ -16,6 +16,24 @@ import { delay } from "./browser-utils.js";
 
 const MAIL_HOME_URL = "https://mail.proton.me";
 
+/**
+ * @typedef {import("playwright-core").Page} Page
+ * @typedef {import("playwright-core").BrowserContext} BrowserContext
+ * @typedef {{ state: string, url?: string }} NavigationResult
+ * @typedef {{ success: boolean, loginMethod?: string, manualRequired?: boolean, sessionValid?: boolean, [key: string]: unknown }} BrowserAuthResult
+ */
+
+/**
+ * @param {{
+ *   page: Page,
+ *   context: BrowserContext,
+ *   username: string,
+ *   password: string,
+ *   sessionFile: string,
+ *   suppressCooldown?: boolean
+ * }} input
+ * @returns {Promise<BrowserAuthResult>}
+ */
 export async function performLogin({ page, context, username, password, sessionFile, suppressCooldown = false }) {
   if (!page.url().includes("account.proton.me")) {
     await page.goto(MAIL_HOME_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -97,6 +115,17 @@ export async function performLogin({ page, context, username, password, sessionF
   return resultWithError("Automatic login timed out", { manualRequired: true, debugEvents: getDebugEvents(page) });
 }
 
+/**
+ * @param {{
+ *   page: Page,
+ *   context: BrowserContext,
+ *   mailUrl: string,
+ *   sessionFile: string,
+ *   timeoutSeconds: number,
+ *   navigateToInbox: (page: Page, url?: string) => Promise<NavigationResult>
+ * }} input
+ * @returns {Promise<BrowserAuthResult>}
+ */
 export async function waitForManualLoginCompletion({ page, context, mailUrl, sessionFile, timeoutSeconds, navigateToInbox }) {
   const startedAt = Date.now();
   const timeoutMs = Math.max(5, timeoutSeconds) * 1000;

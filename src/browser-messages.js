@@ -3,16 +3,43 @@ import { MESSAGE_ROW_SELECTOR, dismissModals } from "./browser-selectors.js";
 import { resultWithError } from "./browser-session.js";
 import { delay, normalizeText, truncate } from "./browser-utils.js";
 
+/**
+ * @typedef {import("playwright-core").Frame} Frame
+ * @typedef {import("playwright-core").Page} Page
+ * @typedef {{ index: number, preview: string }} MessagePreview
+ * @typedef {{
+ *   limit?: number,
+ *   mailUrl: string,
+ *   mailAllUrl: string,
+ *   isInboxUrl: (url: string) => boolean,
+ *   navigateToInbox: (page: Page, url?: string) => Promise<{ state: string, url?: string }>
+ * }} ScanFallbackOptions
+ * @typedef {string | RegExp | ((message: MessagePreview) => boolean)} MessageMatcher
+ */
+
 const OTP_RE = /\b(\d{6})\b/;
 
+/**
+ * @param {unknown} text
+ * @returns {string}
+ */
 export function extractFirstOtpCode(text) {
   return String(text || "").match(OTP_RE)?.[1] || "";
 }
 
+/**
+ * @param {unknown} preview
+ * @returns {boolean}
+ */
 export function matchOpenAiEmail(preview) {
   return /openai|noreply@openai\.com/i.test(String(preview || ""));
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [limit]
+ * @returns {Promise<{ inboxMessageCount: number, messages: MessagePreview[], debugEvents: import("./browser-debug.js").DebugEvent[] }>}
+ */
 export async function scanInbox(page, limit = 50) {
   await page.waitForSelector('[data-testid="message-list-loaded"]', { timeout: 10000 }).catch((error) => {
     recordDebugEvent(page, "selector.failure", selectorDebugDetails({ area: "messageListLoaded", selector: '[data-testid="message-list-loaded"]', timeout: 10000 }), error);
@@ -43,6 +70,11 @@ export async function scanInbox(page, limit = 50) {
   return { inboxMessageCount: count, messages, debugEvents: getDebugEvents(page) };
 }
 
+/**
+ * @param {Page} page
+ * @param {ScanFallbackOptions} options
+ * @returns {Promise<{ inboxMessageCount: number, messages: MessagePreview[], debugEvents: import("./browser-debug.js").DebugEvent[] }>}
+ */
 export async function scanInboxWithFallback(page, { limit = 50, mailUrl, mailAllUrl, isInboxUrl, navigateToInbox }) {
   const scan = await scanInbox(page, limit);
   if (scan.inboxMessageCount > 0 || mailUrl === mailAllUrl || !isInboxUrl(page.url())) {
@@ -59,6 +91,11 @@ export async function scanInboxWithFallback(page, { limit = 50, mailUrl, mailAll
   return scanInbox(page, limit);
 }
 
+/**
+ * @param {MessagePreview[]} messages
+ * @param {MessageMatcher | undefined} matchText
+ * @returns {MessagePreview | null}
+ */
 export function findMatchingMessage(messages, matchText) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return null;
@@ -81,6 +118,11 @@ export function findMatchingMessage(messages, matchText) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} index
+ * @returns {Promise<void>}
+ */
 export async function openMessage(page, index) {
   const locator = page.locator(MESSAGE_ROW_SELECTOR).nth(index);
   await locator.scrollIntoViewIfNeeded().catch((error) => {
@@ -90,7 +132,7 @@ export async function openMessage(page, index) {
     await locator.click({ timeout: 5000 });
   } catch (error) {
     recordDebugEvent(page, "selector.failure", selectorDebugDetails({ area: "messageRowClick", selector: MESSAGE_ROW_SELECTOR, timeout: 5000 }), error);
-    await locator.evaluate((node) => node.click()).catch(ignoreWithDebug(`DOM click failed for message row ${index}`));
+    await locator.evaluate((/** @type {HTMLElement} */ node) => node.click()).catch(ignoreWithDebug(`DOM click failed for message row ${index}`));
   }
   try {
     await page.waitForSelector('[data-testid="content-iframe"]', { timeout: 10000 });
@@ -100,6 +142,11 @@ export async function openMessage(page, index) {
   }
 }
 
+/**
+ * @param {Page} page
+ * @param {string} fallbackPreview
+ * @returns {Promise<{ success: false, [key: string]: unknown } | { success: true, subject: string, bodyText: string }>}
+ */
 export async function extractOpenedMessage(page, fallbackPreview) {
   const iframeHandle = await page.$('[data-testid="content-iframe"]');
   if (!iframeHandle) {
@@ -120,6 +167,11 @@ export async function extractOpenedMessage(page, fallbackPreview) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {string} fallback
+ * @returns {Promise<string>}
+ */
 async function getOpenedMessageSubject(page, fallback) {
   for (const candidate of [
     { description: { selector: '[data-testid*="subject"]' }, locator: page.locator('[data-testid*="subject"]').first() },
@@ -138,6 +190,10 @@ async function getOpenedMessageSubject(page, fallback) {
   return truncate(fallback, 120);
 }
 
+/**
+ * @param {Frame} frame
+ * @returns {Promise<void>}
+ */
 async function expandOriginalMessageIfNeeded(frame) {
   const trigger = frame.locator('[data-testid="message-view:expand-codeblock"]').first();
   try {

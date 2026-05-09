@@ -4,16 +4,31 @@ import { fileURLToPath } from "node:url";
 import { debugLog } from "./browser-debug.js";
 import { SessionExpiredError } from "./errors.js";
 
+/**
+ * @typedef {{ exists: boolean, storageState?: unknown, error?: string | null }} StorageLoadResult
+ * @typedef {{ state?: string }} NavigationState
+ * @typedef {{ storageState: () => Promise<unknown> }} StorageContext
+ * @typedef {Error & { code?: string, status?: number, details?: unknown }} StructuredError
+ */
+
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 export const DEFAULT_SESSION_FILE = path.join(DATA_DIR, "protonmail-auth.json");
 const LOGIN_COOLDOWN_MS = 5 * 60 * 1000;
 const PRIVATE_FILE_MODE = 0o600;
 
+/**
+ * @param {unknown} filePath
+ * @returns {string}
+ */
 export function normalizePath(filePath) {
   return filePath ? path.resolve(String(filePath)) : "";
 }
 
+/**
+ * @param {unknown} filePath
+ * @returns {string}
+ */
 export function normalizeAbsolutePath(filePath) {
   if (!filePath) {
     return "";
@@ -22,11 +37,20 @@ export function normalizeAbsolutePath(filePath) {
   return path.isAbsolute(candidate) ? path.resolve(candidate) : "";
 }
 
+/**
+ * @param {string} name
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 export function env(name, fallback = "") {
   const value = process.env[name];
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
+/**
+ * @param {string} dirPath
+ * @returns {void}
+ */
 export function ensureDir(dirPath) {
   if (!dirPath) {
     return;
@@ -34,6 +58,10 @@ export function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
 
+/**
+ * @param {string} dirPath
+ * @returns {void}
+ */
 export function ensurePrivateDir(dirPath) {
   ensureDir(dirPath);
   try {
@@ -43,6 +71,10 @@ export function ensurePrivateDir(dirPath) {
   }
 }
 
+/**
+ * @param {unknown} filePath
+ * @returns {boolean}
+ */
 export function loadEnvFile(filePath) {
   const trustedPath = normalizeAbsolutePath(filePath);
   if (!trustedPath || !fs.existsSync(trustedPath)) {
@@ -68,6 +100,10 @@ export function loadEnvFile(filePath) {
   return true;
 }
 
+/**
+ * @param {string} sessionFile
+ * @returns {{ exists: false, storageState: null, error: null } | { exists: true, storageState: unknown, error: null } | { exists: true, storageState: null, error: string }}
+ */
 export function loadStorageState(sessionFile) {
   if (!fs.existsSync(sessionFile)) {
     return { exists: false, storageState: null, error: null };
@@ -82,19 +118,32 @@ export function loadStorageState(sessionFile) {
     return {
       exists: true,
       storageState: null,
-      error: error?.message || "Session file unreadable",
+      error: error instanceof Error ? error.message : "Session file unreadable",
     };
   }
 }
 
+/**
+ * @param {StorageLoadResult} storage
+ * @param {NavigationState} navigation
+ * @returns {boolean}
+ */
 export function isExpiredSavedSession(storage, navigation) {
   return Boolean(storage?.exists && storage.storageState && navigation?.state === "login");
 }
 
+/**
+ * @param {string} sessionFile
+ * @returns {string}
+ */
 export function cooldownFile(sessionFile) {
   return path.join(path.dirname(sessionFile), "protonmail-login-cooldown.json");
 }
 
+/**
+ * @param {string} sessionFile
+ * @returns {{ active: boolean }}
+ */
 export function getCooldownState(sessionFile) {
   const filePath = cooldownFile(sessionFile);
   if (!fs.existsSync(filePath)) {
@@ -113,11 +162,20 @@ export function getCooldownState(sessionFile) {
   }
 }
 
+/**
+ * @param {string} sessionFile
+ * @param {string} reason
+ * @returns {void}
+ */
 export function writeCooldown(sessionFile, reason) {
   const filePath = cooldownFile(sessionFile);
   writePrivateJsonFile(filePath, { lastFailedAt: new Date().toISOString(), reason });
 }
 
+/**
+ * @param {string} sessionFile
+ * @returns {void}
+ */
 export function clearCooldown(sessionFile) {
   const filePath = cooldownFile(sessionFile);
   if (fs.existsSync(filePath)) {
@@ -125,11 +183,21 @@ export function clearCooldown(sessionFile) {
   }
 }
 
+/**
+ * @param {StorageContext} context
+ * @param {string} sessionFile
+ * @returns {Promise<void>}
+ */
 export async function saveSession(context, sessionFile) {
   const storageState = await context.storageState();
   writePrivateJsonFile(sessionFile, storageState);
 }
 
+/**
+ * @param {string} filePath
+ * @param {unknown} value
+ * @returns {void}
+ */
 export function writePrivateJsonFile(filePath, value) {
   ensurePrivateDir(path.dirname(filePath));
   const tempFile = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
@@ -146,21 +214,31 @@ export function writePrivateJsonFile(filePath, value) {
   }
 }
 
+/**
+ * @param {unknown} error
+ * @param {Record<string, unknown>} [extra]
+ * @returns {{ success: false, error: unknown, [key: string]: unknown }}
+ */
 export function resultWithError(error, extra = {}) {
   if (error instanceof Error) {
+    const structuredError = /** @type {StructuredError} */ (error);
     return {
       success: false,
       error: error.message,
       errorName: error.name,
-      code: error.code,
-      status: error.status,
-      details: error.details,
+      code: structuredError.code,
+      status: structuredError.status,
+      details: structuredError.details,
       ...extra,
     };
   }
   return { success: false, error, ...extra };
 }
 
+/**
+ * @param {Record<string, unknown>} [details]
+ * @returns {{ success: false, error: unknown, [key: string]: unknown }}
+ */
 export function sessionExpiredResult(details = {}) {
   return resultWithError(new SessionExpiredError("Saved Proton Mail session expired; refresh the session file", details), {
     sessionExpired: true,

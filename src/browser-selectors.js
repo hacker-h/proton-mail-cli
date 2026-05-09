@@ -1,14 +1,30 @@
 import { debugLog, ignoreWithDebug, recordDebugEvent, selectorDebugDetails } from "./browser-debug.js";
 import { delay, normalizeText } from "./browser-utils.js";
 
+/**
+ * @typedef {import("playwright-core").Frame} Frame
+ * @typedef {import("playwright-core").Locator} Locator
+ * @typedef {import("playwright-core").Page} Page
+ * @typedef {{ selector?: string, role?: string, name?: string }} CandidateDescription
+ * @typedef {{ description: CandidateDescription, locator: Locator }} LocatorCandidate
+ */
+
 export const MESSAGE_ROW_SELECTOR = '[data-testid*="message-item"]';
 
 const AUTH_CHALLENGE_TEXT_RE = /\b(captcha|hcaptcha|human verification|verify that you are human|verify you are human|security check)\b/iu;
 
+/**
+ * @param {unknown} content
+ * @returns {boolean}
+ */
 export function hasAuthChallengeText(content) {
   return AUTH_CHALLENGE_TEXT_RE.test(normalizeText(content));
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<boolean>}
+ */
 export async function hasAuthChallenge(page) {
   const currentUrl = page.url();
   if (/\/(captcha|human-verification|security-check)(\/|$|[?#])/iu.test(currentUrl)) {
@@ -46,6 +62,10 @@ export async function hasAuthChallenge(page) {
   return hasAuthChallengeText(await getVisiblePageText(page));
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<string>}
+ */
 export async function getVisiblePageText(page) {
   try {
     return await page.locator("body").innerText({ timeout: 1000 });
@@ -55,6 +75,10 @@ export async function getVisiblePageText(page) {
   }
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<boolean>}
+ */
 export async function hasInboxIndicators(page) {
   for (const selector of [MESSAGE_ROW_SELECTOR, '[data-testid*="compose"]', '[data-testid*="navigation-link:inbox"]']) {
     try {
@@ -69,6 +93,11 @@ export async function hasInboxIndicators(page) {
   return false;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ * @returns {Promise<Locator | null>}
+ */
 export async function locateLoginEmailField(page, timeout = 15000) {
   return firstVisibleCandidate(page, "loginEmail", [
     {
@@ -82,6 +111,11 @@ export async function locateLoginEmailField(page, timeout = 15000) {
   ], timeout);
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ * @returns {Promise<Locator | null>}
+ */
 export async function locateLoginPasswordField(page, timeout = 10000) {
   return firstVisibleCandidate(page, "loginPassword", [
     {
@@ -95,6 +129,11 @@ export async function locateLoginPasswordField(page, timeout = 10000) {
   ], timeout);
 }
 
+/**
+ * @param {Page} page
+ * @param {number} [timeout]
+ * @returns {Promise<Locator | null>}
+ */
 export async function locateSignInButton(page, timeout = 10000) {
   return firstVisibleCandidate(page, "signInButton", [
     {
@@ -108,6 +147,10 @@ export async function locateSignInButton(page, timeout = 10000) {
   ], timeout);
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<Locator | null>}
+ */
 export async function locateStaySignedInCheckbox(page) {
   const candidates = [
     {
@@ -132,6 +175,11 @@ export async function locateStaySignedInCheckbox(page) {
   return null;
 }
 
+/**
+ * @param {Page} page
+ * @param {number} timeoutMs
+ * @returns {Promise<{ state: string, url: string }>}
+ */
 export async function waitForInboxOrLogin(page, timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -156,6 +204,10 @@ export async function waitForInboxOrLogin(page, timeoutMs) {
   return { state: "unknown", url: page.url() };
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<string[]>}
+ */
 export async function getAlertTexts(page) {
   const alerts = page.locator('[role="alert"]');
   const count = await alerts.count();
@@ -173,6 +225,10 @@ export async function getAlertTexts(page) {
   return texts;
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<boolean>}
+ */
 export async function dismissModals(page) {
   const modalSelector = '[data-testid*="modal"], [role="dialog"], .modal, .modal-two';
   let dismissed = false;
@@ -188,8 +244,10 @@ export async function dismissModals(page) {
           const text = String(node.textContent || node.getAttribute("aria-label") || "").toLowerCase().trim();
           if (!text) continue;
           if (["close", "dismiss", "not now", "later", "cancel", "schließen", "später", "got it", "accept"].some((term) => text.includes(term))) {
-            node.click();
-            return true;
+            if ("click" in node && typeof node.click === "function") {
+              node.click();
+              return true;
+            }
           }
         }
       }
@@ -205,6 +263,10 @@ export async function dismissModals(page) {
   return dismissed;
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<boolean>}
+ */
 export async function completeAppsPageIfNeeded(page) {
   if (!page.url().includes("account.proton.me/apps")) {
     return false;
@@ -228,6 +290,10 @@ export async function completeAppsPageIfNeeded(page) {
   return false;
 }
 
+/**
+ * @param {Page} page
+ * @returns {Promise<string>}
+ */
 export async function getPageContent(page) {
   try {
     return await page.content();
@@ -237,6 +303,13 @@ export async function getPageContent(page) {
   }
 }
 
+/**
+ * @param {Page} page
+ * @param {string} area
+ * @param {LocatorCandidate[]} candidates
+ * @param {number} timeout
+ * @returns {Promise<Locator | null>}
+ */
 async function firstVisibleCandidate(page, area, candidates, timeout) {
   for (const candidate of candidates) {
     try {
@@ -251,6 +324,10 @@ async function firstVisibleCandidate(page, area, candidates, timeout) {
   return null;
 }
 
+/**
+ * @param {unknown} url
+ * @returns {string}
+ */
 function classifyUrl(url) {
   const text = String(url || "");
   if (text.includes("account.proton.me")) return "account";
