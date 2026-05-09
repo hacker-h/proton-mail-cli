@@ -82,9 +82,10 @@ describe("pm CLI runner", () => {
       messages: [{ id: "msg1", subject: "Hello" }],
       options,
     }));
+    const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pm-config-home-"));
 
     let exitCode;
-    await withEnv({ XDG_CONFIG_HOME: undefined }, async () => {
+    await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
       exitCode = await runPmCli({
         argv: ["ls", "--timeout", "20", "--session", "session.json"],
         clients: { mail: { list } },
@@ -97,7 +98,7 @@ describe("pm CLI runner", () => {
     assert.equal(list.mock.callCount(), 1);
     assert.deepEqual(list.mock.calls[0].arguments[0], {
       timeout: 20,
-      config: path.join(os.homedir(), "Library", "Application Support", "proton-mail-cli", "config.json"),
+      config: path.join(configHome, "proton-mail-cli", "config.json"),
       session: path.resolve("session.json"),
       quiet: false,
       verbose: false,
