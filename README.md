@@ -55,9 +55,11 @@ if (otp.success) {
 ### Browser Client Runtime Notes
 
 - Fresh automated logins can trigger Proton CAPTCHA or other human-verification challenges.
+- Accounts with 2FA/TOTP enabled require manual completion. The browser client detects Proton's 2FA/TOTP step and returns a structured failure such as `{ success: false, twoFactor: true, manualRequired: true }`; it does not generate or submit TOTP codes.
 - The durable operational model is:
   1. automatic login when Proton allows it
   2. saved-session reuse for normal programmatic runs
+- For accounts with 2FA, run a headful/manual capture once, complete the challenge in the browser, and reuse the saved session file for automation.
 - `envFile` should be an absolute path to a trusted credentials file when used.
 - Session files contain secret-bearing browser state and should stay untracked.
 
@@ -69,6 +71,11 @@ import { ProtonMailClient, Labels } from "protonmail-api-client";
 const client = new ProtonMailClient({
   sessionStore: mySessionStore,
   baseUrl: "https://mail.proton.me/api",
+  rateLimit: {
+    maxRetries: 2,
+    baseDelayMs: 200,
+    maxDelayMs: 3000,
+  },
 });
 
 const { messages, total } = await client.getMessageMetadata({ LabelID: Labels.INBOX });
@@ -79,6 +86,8 @@ const labels = await client.getLabels();
 const newLabel = await client.createLabel("Important", "#ff0000");
 const calendars = await client.api("GET", "/calendar/v1");
 ```
+
+HTTP 429 responses respect `Retry-After` when Proton sends it. Without that header, retries use exponential back-off with jitter until the `rateLimit.maxRetries` budget is exhausted, then throw `RateLimitError` with `retryAfter` and `retryAfterMs` fields.
 
 ## Session Store Interface
 
@@ -120,7 +129,7 @@ See [docs/session-store.md](docs/session-store.md) for the full method contract,
 - REST message body decryption
 - Key management
 - Contacts
-- 2FA/TOTP during auth
+- Automated 2FA/TOTP completion during auth
 - FIDO2/WebAuthn during auth
 - Import messages
 - Undo actions
@@ -128,6 +137,8 @@ See [docs/session-store.md](docs/session-store.md) for the full method contract,
 - Filters/Rules
 - Settings
 - Guaranteed fresh-login success when Proton presents CAPTCHA/human verification
+
+2FA/TOTP challenge detection is implemented for the browser login path. Automated 2FA/TOTP completion is intentionally unsupported; CI and other unattended jobs must use a pre-captured saved session instead of trying to solve 2FA during fresh login.
 
 ## Architecture
 
@@ -153,9 +164,11 @@ This opens a headful Chromium browser with CDP enabled, keeps it open on failure
 
 ## CI/CD
 
-Pull requests run offline gates for every contributor. Same-repository pull requests, including Dependabot branches, also run live Proton login regression with the cached test-account session. Fork pull requests stay offline-only so repository secrets are never exposed to untrusted code.
+Required pull-request gates are offline only: install, typecheck, unit tests, and package smoke. Proton-facing checks are isolated in a separate workflow that requires repository secrets and can report Proton-side drift such as CAPTCHA, selector changes, or backend auth changes without becoming the deterministic merge gate.
 
-See [docs/ci.md](docs/ci.md) for the full gate contract, local commands, live-test secrets, and drift policy.
+Releases are automated by semantic-release on pushes to `main` after the offline gate passes. Because the package is currently private, releases publish GitHub Releases with attached npm tarballs instead of publishing to the npm registry.
+
+See [docs/ci.md](docs/ci.md) for the full gate contract, local commands, live-test secrets, and drift policy. See [docs/RELEASING.md](docs/RELEASING.md) for release behavior and the npm-publishing checklist.
 
 ## Related
 
