@@ -7,6 +7,24 @@ const APP_DIR = "proton-mail-cli";
 const SECRET_KEY_RE = /(password|secret|token|cookie|authorization|session|auth|body)/iu;
 const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu;
 
+/**
+ * @typedef {Record<string, string | undefined>} EnvLike
+ * @typedef {(filePath: string, encoding: BufferEncoding) => string} ReadFileLike
+ * @typedef {(filePath: string) => boolean} ExistsLike
+ * @typedef {(command: string) => string} RunCommandLike
+ * @typedef {{ config?: string | null, session?: string | null, timeout?: number | null }} CliGlobalConfig
+ * @typedef {{ sessionFile?: unknown, session?: unknown, timeoutSeconds?: unknown, timeout?: unknown }} CliConfigFileValues
+ * @typedef {{ value: string, source: string, error?: string }} SecretResult
+ * @typedef {{ path: string, exists: boolean, loaded: boolean, error: string | null }} ResolvedConfigFile
+ * @typedef {{ sessionFile: string, timeout: number | null, username: string, password: string }} ResolvedConfigValues
+ * @typedef {{ config: string, sessionFile: string, timeout: string, username: string, password: string }} ResolvedConfigSources
+ * @typedef {{ username: string | null, password: string | null }} ResolvedConfigErrors
+ * @typedef {{ configFile: ResolvedConfigFile, values: ResolvedConfigValues, sources: ResolvedConfigSources, errors: ResolvedConfigErrors }} ResolvedCliConfig
+ * @typedef {{ exists: boolean, loaded: boolean, config: CliConfigFileValues, error: string | null }} LoadedConfigFile
+ * @typedef {{ session?: (...args: unknown[]) => unknown | Promise<unknown>, auth?: (...args: unknown[]) => unknown | Promise<unknown> }} DoctorClient
+ * @typedef {{ doctor?: DoctorClient }} DoctorClients
+ */
+
 export const CONFIG_ENV = Object.freeze({
   configFile: "PROTONMAIL_CONFIG_FILE",
   sessionFile: "PROTONMAIL_SESSION_FILE",
@@ -15,14 +33,28 @@ export const CONFIG_ENV = Object.freeze({
   password: "PROTONMAIL_PASSWORD",
 });
 
+/**
+ * @param {EnvLike} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @returns {string}
+ */
 export function defaultConfigFile(env = process.env, platform = process.platform) {
   return path.join(userConfigDir(env, platform), "config.json");
 }
 
+/**
+ * @param {EnvLike} [env]
+ * @param {NodeJS.Platform} [platform]
+ * @returns {string}
+ */
 export function defaultSessionFilePath(env = process.env, platform = process.platform) {
   return path.join(userCacheDir(env, platform), "protonmail-auth.json");
 }
 
+/**
+ * @param {{ global?: CliGlobalConfig, env?: EnvLike, readFile?: ReadFileLike, exists?: ExistsLike, runCommand?: RunCommandLike }} [options]
+ * @returns {ResolvedCliConfig}
+ */
 export function resolveCliConfig({ global = {}, env = process.env, readFile = fs.readFileSync, exists = fs.existsSync, runCommand = defaultRunCommand } = {}) {
   const configPath = path.resolve(global.config || env[CONFIG_ENV.configFile] || defaultConfigFile(env));
   const configFile = loadConfigFile(configPath, { readFile, exists });
@@ -69,6 +101,10 @@ export function resolveCliConfig({ global = {}, env = process.env, readFile = fs
   };
 }
 
+/**
+ * @param {CliGlobalConfig} [global]
+ * @param {{ env?: EnvLike, readFile?: ReadFileLike, exists?: ExistsLike, runCommand?: RunCommandLike }} [options]
+ */
 export function doctorConfig(global = {}, options = {}) {
   const resolved = resolveCliConfig({ global, ...options });
   const secretErrors = Object.values(resolved.errors).filter(Boolean);
@@ -87,6 +123,11 @@ export function doctorConfig(global = {}, options = {}) {
   };
 }
 
+/**
+ * @param {CliGlobalConfig} [global]
+ * @param {DoctorClients} [clients]
+ * @param {{ env?: EnvLike, readFile?: ReadFileLike, exists?: ExistsLike, runCommand?: RunCommandLike }} [options]
+ */
 export async function doctorSession(global = {}, clients = {}, options = {}) {
   const resolved = resolveCliConfig({ global, ...options });
   if (resolved.configFile.error) {
@@ -109,6 +150,10 @@ export async function doctorSession(global = {}, clients = {}, options = {}) {
   return inspectSessionFile(resolved.values.sessionFile, options);
 }
 
+/**
+ * @param {string} sessionFile
+ * @param {{ exists?: ExistsLike, readFile?: ReadFileLike }} [options]
+ */
 export function inspectSessionFile(sessionFile, { exists = fs.existsSync, readFile = fs.readFileSync } = {}) {
   if (!exists(sessionFile)) {
     return { status: "missing_session", sessionFile, ready: false };
@@ -120,32 +165,39 @@ export function inspectSessionFile(sessionFile, { exists = fs.existsSync, readFi
     const origins = Array.isArray(data.origins) ? data.origins.length : 0;
     return { status: "session_ready", sessionFile, ready: true, cookies, origins };
   } catch (error) {
-    return { status: "session_unreadable", sessionFile, ready: false, error: error?.message || "Session file is unreadable" };
+    return { status: "session_unreadable", sessionFile, ready: false, error: error instanceof Error && error.message ? error.message : "Session file is unreadable" };
   }
 }
 
+/** @param {unknown} [result] */
 export function normalizeAuthDoctorResult(result = {}) {
-  if (result.status) {
-    return redact(result);
+  const record = toRecord(result);
+  if (record.status) {
+    return redact(record);
   }
-  if (result.sessionExpired || result.errorName === "SessionExpiredError" || result.code === "SESSION_EXPIRED") {
-    return redact({ ...result, status: "expired_session", ready: false });
+  if (record.sessionExpired || record.errorName === "SessionExpiredError" || record.code === "SESSION_EXPIRED") {
+    return redact({ ...record, status: "expired_session", ready: false });
   }
-  if (result.twoFactor || result.manualRequired || result.captcha) {
-    return redact({ ...result, status: "manual_required", ready: false });
+  if (record.twoFactor || record.manualRequired || record.captcha) {
+    return redact({ ...record, status: "manual_required", ready: false });
   }
-  if (result.upstreamFailure || result.statusCode >= 500) {
-    return redact({ ...result, status: "upstream_failure", ready: false });
+  if (record.upstreamFailure || Number(record.statusCode) >= 500) {
+    return redact({ ...record, status: "upstream_failure", ready: false });
   }
-  if (result.success === true || result.sessionValid === true) {
-    return redact({ ...result, status: "auth_ready", ready: true });
+  if (record.success === true || record.sessionValid === true) {
+    return redact({ ...record, status: "auth_ready", ready: true });
   }
-  if (result.success === false) {
-    return redact({ ...result, status: "upstream_failure", ready: false });
+  if (record.success === false) {
+    return redact({ ...record, status: "upstream_failure", ready: false });
   }
-  return redact({ ...result, status: "unknown", ready: false });
+  return redact({ ...record, status: "unknown", ready: false });
 }
 
+/**
+ * @param {string} name
+ * @param {{ env?: EnvLike, readFile?: ReadFileLike, runCommand?: RunCommandLike }} [options]
+ * @returns {SecretResult}
+ */
 export function resolveSecret(name, { env = process.env, readFile = fs.readFileSync, runCommand = defaultRunCommand } = {}) {
   const direct = stringValue(env[name]);
   if (direct) return { value: direct, source: "env" };
@@ -155,7 +207,7 @@ export function resolveSecret(name, { env = process.env, readFile = fs.readFileS
     try {
       return { value: String(readFile(filePath, "utf8")).trim(), source: "file" };
     } catch (error) {
-      return { value: "", source: "file", error: error?.message || `Unable to read ${name}_FILE` };
+      return { value: "", source: "file", error: error instanceof Error && error.message ? error.message : `Unable to read ${name}_FILE` };
     }
   }
 
@@ -164,17 +216,22 @@ export function resolveSecret(name, { env = process.env, readFile = fs.readFileS
     try {
       return { value: runCommand(command).trim(), source: "command" };
     } catch (error) {
-      return { value: "", source: "command", error: error?.message || `Unable to run ${name}_COMMAND` };
+      return { value: "", source: "command", error: error instanceof Error && error.message ? error.message : `Unable to run ${name}_COMMAND` };
     }
   }
 
   return { value: "", source: "missing" };
 }
 
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
 export function redact(value) {
   if (Array.isArray(value)) return value.map((item) => redact(item));
   if (!value || typeof value !== "object") return typeof value === "string" ? redactString(value) : value;
 
+  /** @type {Record<string, unknown>} */
   const output = {};
   for (const [key, child] of Object.entries(value)) {
     output[key] = SECRET_KEY_RE.test(key) ? "[redacted]" : redact(child);
@@ -182,6 +239,7 @@ export function redact(value) {
   return output;
 }
 
+/** @param {ResolvedCliConfig} resolved */
 function redactedConfig(resolved) {
   return {
     configFile: resolved.configFile,
@@ -195,10 +253,20 @@ function redactedConfig(resolved) {
   };
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} source
+ * @param {string | null} [error]
+ */
 function secretState(value, source, error = null) {
   return { configured: Boolean(value), source, error };
 }
 
+/**
+ * @param {string} configPath
+ * @param {{ readFile: ReadFileLike, exists: ExistsLike }} options
+ * @returns {LoadedConfigFile}
+ */
 function loadConfigFile(configPath, { readFile, exists }) {
   if (!exists(configPath)) return { exists: false, loaded: false, config: {}, error: null };
   try {
@@ -208,10 +276,14 @@ function loadConfigFile(configPath, { readFile, exists }) {
     }
     return { exists: true, loaded: true, config, error: null };
   } catch (error) {
-    return { exists: true, loaded: false, config: {}, error: error?.message || "Config file is unreadable" };
+    return { exists: true, loaded: false, config: {}, error: error instanceof Error && error.message ? error.message : "Config file is unreadable" };
   }
 }
 
+/**
+ * @param {EnvLike} env
+ * @param {NodeJS.Platform} platform
+ */
 function userConfigDir(env, platform) {
   if (env.XDG_CONFIG_HOME) return path.join(env.XDG_CONFIG_HOME, APP_DIR);
   if (platform === "darwin") return path.join(os.homedir(), "Library", "Application Support", APP_DIR);
@@ -219,6 +291,10 @@ function userConfigDir(env, platform) {
   return path.join(os.homedir(), ".config", APP_DIR);
 }
 
+/**
+ * @param {EnvLike} env
+ * @param {NodeJS.Platform} platform
+ */
 function userCacheDir(env, platform) {
   if (env.XDG_CACHE_HOME) return path.join(env.XDG_CACHE_HOME, APP_DIR);
   if (platform === "darwin") return path.join(os.homedir(), "Library", "Caches", APP_DIR);
@@ -226,22 +302,37 @@ function userCacheDir(env, platform) {
   return path.join(os.homedir(), ".cache", APP_DIR);
 }
 
+/** @param {string} command */
 function defaultRunCommand(command) {
   return execFileSync(command, { encoding: "utf8", shell: true, stdio: ["ignore", "pipe", "ignore"] });
 }
 
+/**
+ * @param {unknown} value
+ * @param {number | null} fallback
+ */
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/** @param {unknown} value */
 function stringValue(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+/** @param {string} value */
 function redactString(value) {
   return value
     .replace(EMAIL_RE, "[email]")
     .replace(/\b(password|secret|token|cookie|authorization)=\S+/giu, "$1=[redacted]")
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gu, "$1 [redacted]");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function toRecord(value) {
+  return value && typeof value === "object" ? /** @type {Record<string, unknown>} */ (value) : {};
 }

@@ -7,6 +7,54 @@ import {
   AUTH_REFRESH_PATHS,
 } from "./constants.js";
 
+/**
+ * @typedef {{ maxRetries?: number, baseDelayMs?: number, maxDelayMs?: number, jitterRatio?: number }} RateLimitOptions
+ * @typedef {{
+ *   getCookieHeader(url: string): Promise<string> | string,
+ *   getUID?: () => Promise<string> | string,
+ *   getUIDCandidates(): Promise<string[]> | string[],
+ *   getRefreshPayload?: (uid: string) => Promise<unknown> | unknown,
+ *   applySetCookieHeaders?: (url: string, setCookies: string[]) => Promise<void> | void,
+ *   invalidate?: () => Promise<void> | void
+ * }} SessionStore
+ * @typedef {{
+ *   baseUrl?: string | URL,
+ *   appVersion?: string,
+ *   locale?: string,
+ *   fetchImpl?: typeof fetch,
+ *   timeoutMs?: number,
+ *   maxRetries?: number,
+ *   rateLimit?: RateLimitOptions,
+ *   rateLimitMaxRetries?: number,
+ *   rateLimitBaseDelayMs?: number,
+ *   rateLimitMaxDelayMs?: number,
+ *   rateLimitJitterRatio?: number,
+ *   sessionStore: SessionStore,
+ *   debugHttp?: boolean,
+ *   sleep?: (ms: number) => Promise<unknown> | unknown
+ * }} ProtonHttpOptions
+ * @typedef {{ uid?: string | null, query?: Record<string, unknown>, body?: unknown }} RequestOptions
+ * @typedef {{
+ *   Code?: number,
+ *   Error?: string,
+ *   User?: Record<string, unknown>,
+ *   Addresses?: unknown[],
+ *   KeySalts?: unknown[],
+ *   Message?: Record<string, unknown>,
+ *   Messages?: unknown[],
+ *   Total?: number,
+ *   Stale?: boolean,
+ *   IDs?: string[],
+ *   Counts?: unknown[],
+ *   Labels?: unknown[],
+ *   Label?: Record<string, unknown>,
+ *   Conversations?: unknown[],
+ *   EventID?: string,
+ *   raw?: string,
+ *   [key: string]: unknown
+ * }} ProtonApiResponse
+ */
+
 export class ProtonHttp {
   #baseUrl;
   #appVersion;
@@ -22,6 +70,7 @@ export class ProtonHttp {
   #debugHttp;
   #sleep;
 
+  /** @param {ProtonHttpOptions} options */
   constructor(options) {
     this.#baseUrl = new URL(options.baseUrl || DEFAULT_API_URL);
     this.#appVersion = options.appVersion || DEFAULT_APP_VERSION;
@@ -39,6 +88,12 @@ export class ProtonHttp {
     this.#sleep = options.sleep || delay;
   }
 
+  /**
+   * @param {string} method
+   * @param {string} pathname
+   * @param {RequestOptions} [options]
+   * @returns {Promise<ProtonApiResponse | null>}
+   */
   async request(method, pathname, options = {}) {
     const uid = options.uid || (await this.#resolveUID());
     const url = new URL(pathname, this.#baseUrl);
@@ -51,6 +106,7 @@ export class ProtonHttp {
       }
     }
 
+    /** @type {Record<string, string>} */
     const headers = {
       Accept: "application/vnd.protonmail.v1+json",
       "x-pm-appversion": this.#appVersion,
@@ -133,7 +189,7 @@ export class ProtonHttp {
         if (error instanceof ApiError) throw error;
         if (isFinal) {
           throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend", {
-            message: error?.message,
+            message: error instanceof Error ? error.message : undefined,
           });
         }
         await this.#sleep(backoffMs(attempt));
@@ -143,6 +199,12 @@ export class ProtonHttp {
     throw new ApiError(502, "UPSTREAM_UNREACHABLE", "Unable to reach Proton backend");
   }
 
+  /**
+   * @param {string} method
+   * @param {string} pathname
+   * @param {{ uid?: string | null }} [options]
+   * @returns {Promise<Response>}
+   */
   async requestRaw(method, pathname, options = {}) {
     const uid = options.uid || (await this.#resolveUID());
     const url = new URL(pathname, this.#baseUrl);
@@ -197,6 +259,7 @@ export class ProtonHttp {
     return candidates[0];
   }
 
+  /** @param {string} uid */
   async #attemptAuthRefresh(uid) {
     for (const refreshPath of AUTH_REFRESH_PATHS) {
       try {
@@ -241,6 +304,7 @@ export class ProtonHttp {
     return false;
   }
 
+  /** @param {string} uid */
   async #extractRefreshPayload(uid) {
     if (typeof this.#sessionStore.getRefreshPayload === "function") {
       return this.#sessionStore.getRefreshPayload(uid);
@@ -248,6 +312,10 @@ export class ProtonHttp {
     return null;
   }
 
+  /**
+   * @param {URL} url
+   * @param {Response} response
+   */
   async #persistSetCookies(url, response) {
     if (typeof this.#sessionStore.applySetCookieHeaders !== "function") return;
 
@@ -257,18 +325,30 @@ export class ProtonHttp {
     }
   }
 
+  /**
+   * @param {string} message
+   * @param {unknown} [details]
+   */
   #log(message, details) {
     if (!this.#debugHttp) return;
     const suffix = details ? ` ${JSON.stringify(details)}` : "";
     console.log(`[protonmail-http] ${message}${suffix}`);
   }
 
+  /**
+   * @param {Headers} headers
+   * @param {number} attempt
+   */
   #rateLimitDelayMs(headers, attempt) {
     const retryAfterMs = parseRetryAfterMs(headers);
     if (retryAfterMs !== null) return retryAfterMs;
     return rateLimitBackoffMs(attempt, this.#rateLimitBaseDelayMs, this.#rateLimitMaxDelayMs, this.#rateLimitJitterRatio);
   }
 
+  /**
+   * @param {Response} response
+   * @param {unknown} [payload]
+   */
   #rateLimitError(response, payload) {
     const retryAfterMs = parseRetryAfterMs(response.headers);
     const retryAfter = retryAfterMs === null ? null : retryAfterMs / 1000;
@@ -280,6 +360,7 @@ export class ProtonHttp {
   }
 }
 
+/** @param {Headers} headers */
 function getSetCookieHeaders(headers) {
   if (!headers) return [];
   if (typeof headers.getSetCookie === "function") {
@@ -290,6 +371,7 @@ function getSetCookieHeaders(headers) {
   return combined ? [combined] : [];
 }
 
+/** @param {Response} response */
 async function parsePayload(response) {
   if (response.status === 204) return null;
   const text = await response.text();
@@ -301,10 +383,12 @@ async function parsePayload(response) {
   }
 }
 
+/** @param {number} attempt */
 function backoffMs(attempt) {
   return Math.min(3000, 200 * 2 ** attempt);
 }
 
+/** @param {Headers} headers */
 function parseRetryAfterMs(headers) {
   const value = headers?.get?.("retry-after");
   if (!value) return null;
@@ -315,6 +399,12 @@ function parseRetryAfterMs(headers) {
   return Math.max(0, dateMs - Date.now());
 }
 
+/**
+ * @param {number} attempt
+ * @param {number} baseDelayMs
+ * @param {number} maxDelayMs
+ * @param {number} jitterRatio
+ */
 function rateLimitBackoffMs(attempt, baseDelayMs, maxDelayMs, jitterRatio) {
   const base = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
   return Math.round(base + base * jitterRatio * Math.random());

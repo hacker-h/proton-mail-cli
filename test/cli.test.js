@@ -1,5 +1,8 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { CLI_EXIT, parseArgv, runPmCli } from "../src/index.js";
 
@@ -80,10 +83,13 @@ describe("pm CLI runner", () => {
       options,
     }));
 
-    const exitCode = await runPmCli({
-      argv: ["ls", "--timeout", "20", "--session", "session.json"],
-      clients: { mail: { list } },
-      ...io,
+    let exitCode;
+    await withEnv({ XDG_CONFIG_HOME: undefined }, async () => {
+      exitCode = await runPmCli({
+        argv: ["ls", "--timeout", "20", "--session", "session.json"],
+        clients: { mail: { list } },
+        ...io,
+      });
     });
 
     assert.equal(exitCode, CLI_EXIT.OK);
@@ -91,8 +97,65 @@ describe("pm CLI runner", () => {
     assert.equal(list.mock.callCount(), 1);
     assert.deepEqual(list.mock.calls[0].arguments[0], {
       timeout: 20,
-      config: null,
-      session: "session.json",
+      config: path.join(os.homedir(), "Library", "Application Support", "proton-mail-cli", "config.json"),
+      session: path.resolve("session.json"),
+      quiet: false,
+      verbose: false,
+      format: "human",
+    });
+  });
+
+  it("passes env session and timeout values to normal mail dispatch", async () => {
+    const io = createIo();
+    const list = mock.fn(async (options) => ({ messages: [], options }));
+
+    await withEnv({
+      XDG_CONFIG_HOME: "/tmp/pm-config-home",
+      XDG_CACHE_HOME: "/tmp/pm-cache-home",
+      PROTONMAIL_CONFIG_FILE: undefined,
+      PROTONMAIL_SESSION_FILE: "/env/session.json",
+      PROTONMAIL_TIMEOUT_SECONDS: "42",
+    }, async () => {
+      const exitCode = await runPmCli({ argv: ["ls"], clients: { mail: { list } }, ...io });
+
+      assert.equal(exitCode, CLI_EXIT.OK);
+    });
+
+    assert.equal(list.mock.callCount(), 1);
+    assert.deepEqual(list.mock.calls[0].arguments[0], {
+      timeout: 42,
+      config: path.join("/tmp/pm-config-home", "proton-mail-cli", "config.json"),
+      session: "/env/session.json",
+      quiet: false,
+      verbose: false,
+      format: "human",
+    });
+  });
+
+  it("passes config-file session and timeout values to normal mail dispatch", async () => {
+    const io = createIo();
+    const list = mock.fn(async (options) => ({ messages: [], options }));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pm-cli-config-"));
+    const configPath = path.join(tempDir, "config.json");
+    fs.writeFileSync(configPath, JSON.stringify({ sessionFile: "/config/session.json", timeoutSeconds: 33 }));
+
+    await withEnv({
+      XDG_CONFIG_HOME: "/tmp/pm-config-home",
+      XDG_CACHE_HOME: "/tmp/pm-cache-home",
+      PROTONMAIL_CONFIG_FILE: undefined,
+      PROTONMAIL_SESSION_FILE: undefined,
+      PROTONMAIL_TIMEOUT_SECONDS: undefined,
+    }, async () => {
+      const exitCode = await runPmCli({ argv: ["ls", "--config", configPath], clients: { mail: { list } }, ...io });
+
+      assert.equal(exitCode, CLI_EXIT.OK);
+    });
+
+    assert.equal(list.mock.callCount(), 1);
+    assert.deepEqual(list.mock.calls[0].arguments[0], {
+      timeout: 33,
+      config: configPath,
+      session: "/config/session.json",
       quiet: false,
       verbose: false,
       format: "human",
@@ -147,6 +210,26 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(missingRead.stderrText()).error.code, "MISSING_MESSAGE_ID");
   });
 
+  it("rejects unexpected positional arguments before dispatch", async () => {
+    const listIo = createIo();
+    const otpIo = createIo();
+    const readIo = createIo();
+    const list = mock.fn(async () => ({ messages: [] }));
+    const get = mock.fn(async () => ({ code: "123456" }));
+    const read = mock.fn(async () => ({ id: "msg1" }));
+
+    assert.equal(await runPmCli({ argv: ["ls", "extra", "--json"], clients: { mail: { list } }, ...listIo }), CLI_EXIT.USAGE);
+    assert.equal(await runPmCli({ argv: ["otp", "extra", "--json"], clients: { otp: { get } }, ...otpIo }), CLI_EXIT.USAGE);
+    assert.equal(await runPmCli({ argv: ["read", "msg1", "extra", "--json"], clients: { mail: { read } }, ...readIo }), CLI_EXIT.USAGE);
+
+    assert.equal(JSON.parse(listIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(JSON.parse(otpIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(JSON.parse(readIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+    assert.equal(list.mock.callCount(), 0);
+    assert.equal(get.mock.callCount(), 0);
+    assert.equal(read.mock.callCount(), 0);
+  });
+
   it("honors quiet mode for human success output", async () => {
     const io = createIo();
     const list = mock.fn(async () => ({ messages: [{ id: "msg1", subject: "Hello" }] }));
@@ -199,4 +282,30 @@ function createIo() {
     stdoutText: () => stdout,
     stderrText: () => stderr,
   };
+}
+
+async function withEnv(values, callback) {
+  const previous = {};
+  for (const key of Object.keys(values)) {
+    previous[key] = process.env[key];
+    const value = values[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    await callback();
+  } finally {
+    for (const key of Object.keys(values)) {
+      const value = previous[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }

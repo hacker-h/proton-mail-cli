@@ -1,5 +1,26 @@
 import fs from "node:fs";
-import { doctorConfig, doctorSession, redact } from "./config.js";
+import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.js";
+
+/**
+ * @typedef {{ write(chunk: string): unknown }} WritableLike
+ * @typedef {"human" | "json"} CliFormat
+ * @typedef {{ format: CliFormat, timeout: number | null, config: string | null, session: string | null, quiet: boolean, verbose: boolean, help: boolean, version: boolean }} GlobalOptions
+ * @typedef {{ command: string, args: string[] }} NormalizedCommand
+ * @typedef {{ command: string, args: string[], global: GlobalOptions }} ParsedCommand
+ * @typedef {(...args: unknown[]) => unknown | Promise<unknown>} CliHandler
+ * @typedef {{ list?: CliHandler, latest?: CliHandler, read?: CliHandler }} CliMailClient
+ * @typedef {{ get?: CliHandler }} CliOtpClient
+ * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
+ * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient, doctor?: CliDoctorClient }} CliClients
+ * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
+ * @typedef {{ command: string, data: unknown, human: string }} CommandResult
+ * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
+ * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
+ * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
+ * @typedef {{ command: string, data: unknown, global: GlobalOptions, stdout: WritableLike, version: string, human?: string }} WriteSuccessOptions
+ * @typedef {{ command: string, error: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string }} WriteFailureOptions
+ */
 
 export const CLI_EXIT = Object.freeze({
   OK: 0,
@@ -11,6 +32,10 @@ export const CLI_EXIT = Object.freeze({
 const DEFAULT_FORMAT = "human";
 const VERSION = readPackageVersion();
 
+/**
+ * @param {CliRunOptions} [options]
+ * @returns {Promise<number>}
+ */
 export async function runPmCli(options = {}) {
   const argv = Array.isArray(options.argv) ? options.argv : [];
   const stdout = options.stdout || process.stdout;
@@ -84,6 +109,10 @@ export async function runPmCli(options = {}) {
 
 export const runPm = runPmCli;
 
+/**
+ * @param {string[]} argv
+ * @returns {ParsedCommand}
+ */
 export function parseArgv(argv) {
   const global = defaultGlobalOptions();
   const positionals = [];
@@ -129,7 +158,7 @@ export function parseArgv(argv) {
     const option = splitOption(token);
     if (option.name === "--format") {
       const value = option.value ?? readOptionValue(argv, ++index, option.name);
-      if (!["human", "json"].includes(value)) {
+      if (value !== "human" && value !== "json") {
         throw new CliError(CLI_EXIT.USAGE, "INVALID_FORMAT", "--format must be human or json", { value });
       }
       global.format = value;
@@ -167,13 +196,19 @@ export function parseArgv(argv) {
   return { ...normalized, global };
 }
 
+/**
+ * @param {{ command: string, args: string[], global: GlobalOptions, clients?: CliClients }} options
+ * @returns {Promise<CommandResult>}
+ */
 export async function dispatchCommand({ command, args, global, clients = {} }) {
   if (command === "mail:list") {
+    expectArgs(args, 0, "pm ls");
     const data = await callInjected(clients.mail?.list, [clientOptions(global)], "pm ls");
     return { command, data, human: renderList(data) };
   }
 
   if (command === "mail:latest") {
+    expectArgs(args, 0, "pm mail latest");
     const data = await callInjected(clients.mail?.latest, [clientOptions(global)], "pm mail latest");
     return { command, data, human: renderObject(data) };
   }
@@ -183,11 +218,13 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     if (!messageId) {
       throw new CliError(CLI_EXIT.USAGE, "MISSING_MESSAGE_ID", "pm read requires <messageId>");
     }
+    expectArgs(args, 1, "pm read <messageId>");
     const data = await callInjected(clients.mail?.read, [messageId, clientOptions(global)], "pm read <messageId>");
     return { command, data, human: renderObject(data) };
   }
 
   if (command === "otp") {
+    expectArgs(args, 0, "pm otp");
     const data = await callInjected(clients.otp?.get, [clientOptions(global)], "pm otp");
     return { command, data, human: renderOtp(data) };
   }
@@ -208,11 +245,40 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
   });
 }
 
+/**
+ * @param {string[]} args
+ * @param {number} expectedCount
+ * @param {string} commandLabel
+ */
+function expectArgs(args, expectedCount, commandLabel) {
+  if (args.length === expectedCount) return;
+  if (args.length < expectedCount) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_ARGUMENT", `${commandLabel} requires ${expectedCount} argument${expectedCount === 1 ? "" : "s"}`, {
+      command: commandLabel,
+      expected: expectedCount,
+      received: args.length,
+    });
+  }
+
+  throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", `${commandLabel} does not accept extra arguments`, {
+    command: commandLabel,
+    expected: expectedCount,
+    received: args.length,
+    args,
+  });
+}
+
 export function rootHelp(version = VERSION) {
   return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
+  /**
+   * @param {number} exitCode
+   * @param {string} code
+   * @param {string} message
+   * @param {unknown} [details]
+   */
   constructor(exitCode, code, message, details) {
     super(message);
     this.name = "CliError";
@@ -222,6 +288,7 @@ export class CliError extends Error {
   }
 }
 
+/** @returns {GlobalOptions} */
 function defaultGlobalOptions() {
   return {
     format: DEFAULT_FORMAT,
@@ -235,6 +302,7 @@ function defaultGlobalOptions() {
   };
 }
 
+/** @param {string[]} argv */
 function globalForParseError(argv) {
   const global = defaultGlobalOptions();
   if (argv.includes("--json") || argv.includes("--format=json")) {
@@ -249,12 +317,18 @@ function globalForParseError(argv) {
   return global;
 }
 
+/** @param {string} token */
 function splitOption(token) {
   const equalsIndex = token.indexOf("=");
   if (equalsIndex === -1) return { name: token, value: undefined };
   return { name: token.slice(0, equalsIndex), value: token.slice(equalsIndex + 1) };
 }
 
+/**
+ * @param {string[]} argv
+ * @param {number} index
+ * @param {string} optionName
+ */
 function readOptionValue(argv, index, optionName) {
   const value = argv[index];
   if (!value || value.startsWith("-")) {
@@ -263,6 +337,10 @@ function readOptionValue(argv, index, optionName) {
   return value;
 }
 
+/**
+ * @param {string[]} positionals
+ * @returns {NormalizedCommand}
+ */
 function normalizeCommand(positionals) {
   const [first, second, ...rest] = positionals;
 
@@ -289,6 +367,11 @@ function normalizeCommand(positionals) {
   return { command: first, args: positionals.slice(1) };
 }
 
+/**
+ * @param {CliHandler | undefined} handler
+ * @param {unknown[]} args
+ * @param {string} commandLabel
+ */
 async function callInjected(handler, args, commandLabel) {
   if (typeof handler !== "function") {
     throw new CliError(
@@ -302,17 +385,23 @@ async function callInjected(handler, args, commandLabel) {
   return handler(...args);
 }
 
+/**
+ * @param {GlobalOptions} global
+ * @returns {ClientOptions}
+ */
 function clientOptions(global) {
+  const resolved = resolveCliConfig({ global });
   return {
-    timeout: global.timeout,
-    config: global.config,
-    session: global.session,
+    timeout: resolved.values.timeout,
+    config: resolved.configFile.path,
+    session: resolved.values.sessionFile,
     quiet: global.quiet,
     verbose: global.verbose,
     format: global.format,
   };
 }
 
+/** @param {WriteSuccessOptions} options */
 function writeSuccess({ command, data, global, stdout, version, human }) {
   if (global.format === "json") {
     stdout.write(`${JSON.stringify(jsonEnvelope({ ok: true, command, data, version }))}\n`);
@@ -323,6 +412,7 @@ function writeSuccess({ command, data, global, stdout, version, human }) {
   return CLI_EXIT.OK;
 }
 
+/** @param {WriteFailureOptions} options */
 function writeFailure({ command, error, global, stdout, stderr, version }) {
   const normalized = normalizeError(error);
   if (global.format === "json") {
@@ -333,12 +423,13 @@ function writeFailure({ command, error, global, stdout, stderr, version }) {
   return normalized.exitCode;
 }
 
+/** @param {JsonEnvelopeOptions} options */
 function jsonEnvelope({ ok, command, data = null, error = null, version }) {
   return {
     ok,
     command,
     data: ok ? data : null,
-    error: ok ? null : errorBody(error),
+    error: ok || !error ? null : errorBody(error),
     meta: {
       version,
       envelope: "pm.v1",
@@ -346,12 +437,16 @@ function jsonEnvelope({ ok, command, data = null, error = null, version }) {
   };
 }
 
+/**
+ * @param {unknown} error
+ * @returns {NormalizedCliError}
+ */
 function normalizeError(error) {
   if (error instanceof CliError) {
     return {
       exitCode: error.exitCode,
       code: error.code,
-      message: redact(error.message),
+      message: String(redact(error.message)),
       details: redact(error.details),
     };
   }
@@ -359,41 +454,67 @@ function normalizeError(error) {
   return {
     exitCode: CLI_EXIT.RUNTIME,
     code: "RUNTIME_ERROR",
-    message: redact(error?.message || "Unexpected CLI failure"),
+    message: String(redact(error instanceof Error && error.message ? error.message : "Unexpected CLI failure")),
   };
 }
 
+/**
+ * @param {NormalizedCliError} error
+ * @returns {CliErrorBody}
+ */
 function errorBody(error) {
+  /** @type {CliErrorBody} */
   const body = { code: error.code, message: error.message };
   if (error.details !== undefined) body.details = error.details;
   return body;
 }
 
+/** @param {unknown} data */
 function renderList(data) {
-  const messages = Array.isArray(data?.messages) ? data.messages : Array.isArray(data) ? data : [];
+  const object = toRecord(data);
+  const messages = Array.isArray(object.messages) ? object.messages : Array.isArray(data) ? data : [];
   if (messages.length === 0) return "No messages.\n";
-  return `${messages.map((message) => `${message.ID || message.id || "<unknown>"}\t${message.Subject || message.subject || "(no subject)"}`).join("\n")}\n`;
+  return `${messages.map((message) => {
+    const item = toRecord(message);
+    return `${item.ID || item.id || "<unknown>"}\t${item.Subject || item.subject || "(no subject)"}`;
+  }).join("\n")}\n`;
 }
 
+/** @param {unknown} data */
 function renderObject(data) {
-  if (data?.message?.subject) return `${data.message.subject}\n`;
-  if (data?.Subject) return `${data.Subject}\n`;
-  if (data?.subject) return `${data.subject}\n`;
+  const object = toRecord(data);
+  const message = toRecord(object.message);
+  if (message.subject) return `${message.subject}\n`;
+  if (object.Subject) return `${object.Subject}\n`;
+  if (object.subject) return `${object.subject}\n`;
   return `${JSON.stringify(data)}\n`;
 }
 
+/** @param {unknown} data */
 function renderOtp(data) {
-  if (data?.code) return `${data.code}\n`;
+  const object = toRecord(data);
+  if (object.code) return `${object.code}\n`;
   return renderObject(data);
 }
 
+/** @param {unknown} data */
 function renderDoctor(data) {
-  const status = data?.status || "unknown";
+  const object = toRecord(data);
+  const status = object.status || "unknown";
   return `${status}\n`;
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ */
 function formatCommand(command, args) {
   return [command, ...(args || [])].filter(Boolean).join(" ");
+}
+
+/** @param {unknown} value */
+function toRecord(value) {
+  return value && typeof value === "object" ? /** @type {Record<string, unknown>} */ (value) : {};
 }
 
 function readPackageVersion() {
