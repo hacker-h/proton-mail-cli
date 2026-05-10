@@ -388,14 +388,14 @@ function normalizeOtpResult(result, requireMatch) {
   if (object.success === false) {
     const status = classifyOtpFailure(object);
     const error = String(object.error || otpFailureMessage(status));
-    const data = {
+    const data = sanitizeOtpOutput({
       ...object,
       success: false,
       status,
       codeFound: false,
       linkFound: false,
       error,
-    };
+    });
     if (!requireMatch) return data;
 
     throw new CliError(CLI_EXIT.USAGE, otpFailureCode(status), otpFailureMessage(status), {
@@ -412,13 +412,39 @@ function normalizeOtpResult(result, requireMatch) {
       status,
     });
   }
-  return {
+  return sanitizeOtpOutput({
     ...object,
     success: object.success ?? true,
     status,
     codeFound,
     linkFound,
-  };
+  });
+}
+
+/** @param {Record<string, unknown>} result */
+function sanitizeOtpOutput(result) {
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (["browser", "context", "page", "debugEvents", "bodyText", "preview"].includes(key)) continue;
+    if (key === "error" || key === "lastError") {
+      output[key] = redact(value);
+      continue;
+    }
+    output[key] = key === "message" ? sanitizeOtpMessage(value) : value;
+  }
+  return output;
+}
+
+/** @param {unknown} message */
+function sanitizeOtpMessage(message) {
+  const object = toRecord(message);
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "receivedAt", "time"]) {
+    if (object[key] !== undefined) output[key] = object[key];
+  }
+  return output;
 }
 
 /** @param {Record<string, unknown>} result */

@@ -68,7 +68,7 @@ Command-specific flags:
 | `--poll-interval <seconds>` | Retry no-match and matched-without-token results until `--timeout` elapses. |
 | `--require-match` | Exit non-zero when no matching email/token/link is found. |
 
-Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--poll-interval` enables built-in polling and uses `--timeout` as the total wait budget, defaulting to 60 seconds if no timeout is configured. `--require-match` turns no match, matched-without-token, timeout, session expiry, and auth/setup failures into CI-friendly failures. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
+Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--poll-interval` enables built-in polling and uses `--timeout` as the total wait budget, defaulting to 60 seconds if no timeout is configured. `--require-match` turns no match, matched-without-token, timeout, session expiry, and auth/setup failures into CI-friendly failures. OTP JSON intentionally omits message bodies, previews, browser handles, and debug events. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
 
 Alias policy:
 
