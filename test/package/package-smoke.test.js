@@ -69,6 +69,11 @@ describe("installed pm package smoke", () => {
     const otpEnvelope = JSON.parse(otpUsage.stderr);
     assert.equal(otpEnvelope.command, "otp");
     assert.equal(otpEnvelope.error.code, "INVALID_LIMIT");
+
+    const pollUsage = run(pm, ["otp", "--poll-interval", "never", "--json"], { cwd: appDir, env });
+    assert.equal(pollUsage.status, 1, pollUsage.stderr);
+    assert.equal(pollUsage.stdout, "");
+    assert.equal(JSON.parse(pollUsage.stderr).error.code, "INVALID_POLL_INTERVAL");
   });
 });
 

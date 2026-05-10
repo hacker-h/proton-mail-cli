@@ -120,6 +120,7 @@ Default no-match behavior should be a successful empty result when absence is ex
 - `--pattern <pattern>` or `--otp-pattern <pattern>` overrides OTP extraction.
 - `--link-pattern <pattern>` extracts links with named capture group `link` or `url` preferred.
 - `--folder <name>` and `--limit <count>` control browser scanning scope.
+- `--poll-interval <seconds>` retries no-match and matched-without-token results until `--timeout` elapses.
 - `--require-match` turns absence into a failure exit for CI jobs.
 
 ## Config and Secrets

@@ -28,7 +28,7 @@ pm ls
 pm mail latest
 pm read <messageId>
 pm otp --match openai --json
-pm otp --provider github --require-match
+pm otp --provider github --poll-interval 2 --timeout 60 --require-match
 ```
 
 Global flags:
@@ -49,7 +49,7 @@ Global flags:
 
 ```bash
 pm otp --match openai --json
-pm otp --provider github --require-match
+pm otp --provider github --poll-interval 2 --timeout 60 --require-match
 pm otp --match '/github/i' --pattern '\\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\\b'
 pm otp --provider magic-link --link-pattern 'https://example.com/\\S+' --json
 ```
@@ -65,9 +65,10 @@ Command-specific flags:
 | `--link-pattern <pattern>` | Extract a matching URL; named capture group `link` or `url` is preferred. |
 | `--folder <name>` | Select the browser scan folder, for example `inbox` or `all-mail`. |
 | `--limit <count>` | Limit how many message previews are scanned. |
+| `--poll-interval <seconds>` | Retry no-match and matched-without-token results until `--timeout` elapses. |
 | `--require-match` | Exit non-zero when no matching email/token/link is found. |
 
-Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--require-match` turns no match, matched-without-token, session expiry, and auth/setup failures into CI-friendly failures. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
+Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--poll-interval` enables built-in polling and uses `--timeout` as the total wait budget, defaulting to 60 seconds if no timeout is configured. `--require-match` turns no match, matched-without-token, timeout, session expiry, and auth/setup failures into CI-friendly failures. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
 
 Alias policy:
 

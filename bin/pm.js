@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { runPmCli } from "../src/cli.js";
+import { extractOtpWithPolling } from "../src/otp-runner.js";
 
 const exitCode = await runPmCli({
   argv: process.argv.slice(2),
@@ -18,15 +19,15 @@ async function extractOtpFromBrowser(options) {
     sessionFile: options.session,
     timeoutSeconds: options.timeout || undefined,
   });
-  return client.extractOtpCode({
+  return extractOtpWithPolling(options, (attemptOptions) => client.extractOtpCode({
     headless: true,
-    timeoutSeconds: options.timeout || undefined,
-    provider: options.provider,
-    matchText: options.matchText,
-    pattern: options.pattern,
-    otpPattern: options.otpPattern,
-    linkPattern: options.linkPattern,
-    folder: options.folder,
-    limit: options.limit,
-  });
+    timeoutSeconds: attemptOptions.timeout || undefined,
+    provider: attemptOptions.provider,
+    matchText: attemptOptions.matchText,
+    pattern: attemptOptions.pattern,
+    otpPattern: attemptOptions.otpPattern,
+    linkPattern: attemptOptions.linkPattern,
+    folder: attemptOptions.folder,
+    limit: attemptOptions.limit,
+  }));
 }

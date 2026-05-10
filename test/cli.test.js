@@ -204,6 +204,8 @@ describe("pm CLI runner", () => {
           "all-mail",
           "--limit",
           "5",
+          "--poll-interval",
+          "2",
           "--require-match",
           "--json",
           "--timeout",
@@ -229,6 +231,7 @@ describe("pm CLI runner", () => {
     assert.equal(options.linkPattern, "https://example.com/\\S+");
     assert.equal(options.folder, "all-mail");
     assert.equal(options.limit, 5);
+    assert.equal(options.pollInterval, 2);
     assert.equal(options.requireMatch, true);
     assert.equal(options.timeout, 20);
     assert.equal(options.session, path.resolve("session.json"));
@@ -279,6 +282,10 @@ describe("pm CLI runner", () => {
 
     assert.equal(await runPmCli({ argv: ["otp", "--limit", "many", "--json"], clients: { otp: { get } }, ...invalidLimit }), CLI_EXIT.USAGE);
     assert.equal(JSON.parse(invalidLimit.stderrText()).error.code, "INVALID_LIMIT");
+
+    const invalidPoll = createIo();
+    assert.equal(await runPmCli({ argv: ["otp", "--poll-interval", "0", "--json"], clients: { otp: { get } }, ...invalidPoll }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(invalidPoll.stderrText()).error.code, "INVALID_POLL_INTERVAL");
 
     assert.equal(await runPmCli({ argv: ["otp", "--unknown", "--json"], clients: { otp: { get } }, ...unknown }), CLI_EXIT.USAGE);
     assert.equal(JSON.parse(unknown.stderrText()).error.code, "UNKNOWN_FLAG");
