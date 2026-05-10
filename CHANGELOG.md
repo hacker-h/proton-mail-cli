@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.5.0...v1.5.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **cli:** redact otp result metadata ([3e223a5](https://github.com/hacker-h/proton-mail-cli/commit/3e223a503472a75c2a76eff9ee40195d7556a941))
+
 # [1.5.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.4.0...v1.5.0) (2026-05-10)
 
 
