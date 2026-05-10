@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.11.0...v1.12.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** deprecate otp command ([ed21ab0](https://github.com/hacker-h/proton-mail-cli/commit/ed21ab0f94df5ef150d935395533686842798e08))
+
 # [1.11.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.10.0...v1.11.0) (2026-05-10)
 
 
