@@ -27,6 +27,7 @@ pm version
 pm ls
 pm ls --match github --limit 5 --json
 pm mail latest
+pm mail search --match github --json
 pm read <messageId>
 pm otp --match openai --json
 pm otp --provider github --poll-interval 2 --timeout 60 --require-match
@@ -46,11 +47,12 @@ Global flags:
 
 ### Mail Listing and Latest Message
 
-`pm ls` / `pm mail list` scan Proton Mail through the browser backend. `pm mail latest` opens the latest matching message and returns safe metadata in JSON while omitting body text, browser handles, and debug events.
+`pm ls` / `pm mail list` scan Proton Mail through the browser backend. `pm mail search` filters browser message previews and requires `--match`. `pm mail latest` opens the latest matching message and returns safe metadata in JSON while omitting body text, browser handles, and debug events.
 
 ```bash
 pm ls --limit 10
 pm ls --match '/github/i' --folder all-mail --json
+pm mail search --match github --require-match --json
 pm mail latest --match openai --require-match --json
 ```
 
