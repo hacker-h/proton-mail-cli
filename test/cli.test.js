@@ -275,6 +275,85 @@ describe("pm CLI runner", () => {
     assert.equal(requiredEnvelope.error.details.status, "matched_without_token");
   });
 
+  it("omits secret-bearing message bodies and debug details from OTP JSON", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({
+      success: true,
+      code: "123456",
+      debugEvents: [{ message: "selector detail" }],
+      message: {
+        id: "msg1",
+        index: 0,
+        subject: "Verify account",
+        preview: "Your secret code is 123456",
+        bodyText: "Full private body with code 123456 and token abc",
+      },
+    }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.data.code, "123456");
+    assert.deepEqual(envelope.data.message, {
+      id: "msg1",
+      index: 0,
+      subject: "Verify account",
+    });
+    assert.equal(JSON.stringify(envelope).includes("bodyText"), false);
+    assert.equal(JSON.stringify(envelope).includes("preview"), false);
+    assert.equal(JSON.stringify(envelope).includes("Full private body"), false);
+    assert.equal(JSON.stringify(envelope).includes("debugEvents"), false);
+  });
+
+  it("omits message bodies from relaxed OTP failure JSON", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({
+      success: false,
+      error: "Matching email found, but no OTP code or link was present",
+      message: {
+        subject: "Verify account",
+        preview: "Private preview",
+        bodyText: "Private body",
+      },
+    }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+    const envelopeText = io.stdoutText();
+    const envelope = JSON.parse(envelopeText);
+    assert.equal(envelope.data.status, "matched_without_token");
+    assert.deepEqual(envelope.data.message, { subject: "Verify account" });
+    assert.equal(envelopeText.includes("Private"), false);
+    assert.equal(envelopeText.includes("bodyText"), false);
+  });
+
+  it("redacts secret details in OTP soft-failure JSON", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({
+      success: false,
+      error: "password=abc user@example.com",
+      lastError: "Bearer secret-token",
+    }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+    const envelopeText = io.stdoutText();
+    assert.equal(envelopeText.includes("abc"), false);
+    assert.equal(envelopeText.includes("user@example.com"), false);
+    assert.equal(envelopeText.includes("secret-token"), false);
+  });
+
+  it("redacts secret details in OTP require-match failures", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({
+      success: false,
+      error: "password=abc user@example.com",
+    }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.USAGE);
+    const envelopeText = io.stderrText();
+    assert.equal(envelopeText.includes("abc"), false);
+    assert.equal(envelopeText.includes("user@example.com"), false);
+  });
+
   it("rejects invalid OTP flags before dispatch", async () => {
     const invalidLimit = createIo();
     const unknown = createIo();
