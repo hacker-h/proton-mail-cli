@@ -18,7 +18,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm mail latest/u);
     assert.match(io.stdoutText(), /pm mail search --match <text>/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
-    assert.match(io.stdoutText(), /pm otp --match <text> --json/u);
+    assert.match(io.stdoutText(), /pm otp --match <text> --json.*Deprecated/u);
     assert.match(io.stdoutText(), /pm doctor config --json/u);
     assert.equal(io.stderrText(), "");
   });
@@ -530,6 +530,10 @@ describe("pm CLI runner", () => {
     const envelope = JSON.parse(io.stdoutText());
     assert.equal(envelope.data.status, "matched");
     assert.equal(envelope.data.codeFound, true);
+    assert.equal(envelope.data.deprecation.deprecated, true);
+    assert.equal(envelope.data.deprecation.removal, "next-major");
+    assert.equal(envelope.data.deprecation.docs, "docs/deprecations.md");
+    assert.equal(io.stderrText(), "");
     assert.equal(get.mock.callCount(), 1);
     const options = get.mock.calls[0].arguments[0];
     assert.equal(options.provider, "github");
@@ -546,6 +550,21 @@ describe("pm CLI runner", () => {
     assert.equal(options.config, path.join(configHome, "proton-mail-cli", "config.json"));
   });
 
+  it("prints a human deprecation warning for pm otp", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({ success: true, code: "123456" }));
+
+    assert.equal(await runPmCli({ argv: ["otp"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+
+    assert.equal(io.stdoutText(), "123456\n");
+    assert.match(io.stderrText(), /deprecated/u);
+
+    const quiet = createIo();
+    assert.equal(await runPmCli({ argv: ["otp", "--quiet"], clients: { otp: { get } }, ...quiet }), CLI_EXIT.OK);
+    assert.equal(quiet.stdoutText(), "");
+    assert.match(quiet.stderrText(), /deprecated/u);
+  });
+
   it("returns a successful empty OTP result unless --require-match is set", async () => {
     const relaxed = createIo();
     const required = createIo();
@@ -556,6 +575,7 @@ describe("pm CLI runner", () => {
     assert.equal(relaxedEnvelope.ok, true);
     assert.equal(relaxedEnvelope.data.status, "no_match");
     assert.equal(relaxedEnvelope.data.codeFound, false);
+    assert.equal(relaxedEnvelope.data.deprecation.deprecated, true);
     assert.equal(relaxed.stderrText(), "");
 
     assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...required }), CLI_EXIT.USAGE);

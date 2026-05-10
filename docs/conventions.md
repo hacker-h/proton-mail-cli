@@ -115,9 +115,9 @@ Default no-match behavior should be a successful empty result when absence is ex
 
 `pm ls` / `pm mail list`, `pm mail search`, and `pm mail latest` follow the same search-like contract. Browser-backed list/search output may include preview snippets but must not include full message bodies, browser handles, or debug events. `pm read browser:index:N` is the explicit plaintext read path and may include `bodyText`.
 
-`pm otp` follows this contract for OTP and link extraction. In human mode it prints only the extracted code or link; in JSON mode it includes stable booleans such as `codeFound` and `linkFound` plus `status`. JSON output must omit message bodies, previews, browser handles, and debug events. The command may reveal the requested OTP/link by design, so tests and logs must never print message bodies, session state, credentials, or unrelated mailbox metadata.
+`pm otp` follows this contract only for the deprecation window. It is deprecated for removal in the next major version; new automation should use mail list/read APIs and parse message bodies in user-owned code. In human mode it prints only the extracted code or link plus a deprecation warning on stderr; in JSON mode it includes stable booleans such as `codeFound` and `linkFound`, `status`, and deprecation metadata. JSON output must omit message bodies, previews, browser handles, debug events, warnings, and progress text. The command may reveal the requested OTP/link by design, so tests and logs must never print message bodies, session state, credentials, or unrelated mailbox metadata.
 
-`pm otp` command-specific flags:
+Deprecated `pm otp` command-specific flags retained until the next major version:
 
 - `--provider <name>` selects a provider preset.
 - `--match <text|/re/i>` filters email previews before extraction.
@@ -126,6 +126,8 @@ Default no-match behavior should be a successful empty result when absence is ex
 - `--folder <name>` and `--limit <count>` control browser scanning scope.
 - `--poll-interval <seconds>` retries no-match and matched-without-token results until `--timeout` elapses.
 - `--require-match` turns absence into a failure exit for CI jobs.
+
+Fixture-backed examples are preferred for OTP integration tests. Do not send live email to a provider unless a separate live/regression workflow explicitly requires it.
 
 ## Config and Secrets
 

@@ -14,14 +14,14 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
  * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient, doctor?: CliDoctorClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
- * @typedef {{ command: string, data: unknown, human: string }} CommandResult
+ * @typedef {{ command: string, data: unknown, human: string, warning?: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
  * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
- * @typedef {{ command: string, data: unknown, global: GlobalOptions, stdout: WritableLike, version: string, human?: string }} WriteSuccessOptions
+ * @typedef {{ command: string, data: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string, human?: string, warning?: string }} WriteSuccessOptions
  * @typedef {{ command: string, error: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string }} WriteFailureOptions
  */
 
@@ -34,6 +34,12 @@ export const CLI_EXIT = Object.freeze({
 
 const DEFAULT_FORMAT = "human";
 const VERSION = readPackageVersion();
+const OTP_DEPRECATION = Object.freeze({
+  deprecated: true,
+  removal: "next-major",
+  message: "Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in your own automation.",
+  docs: "docs/deprecations.md",
+});
 
 /**
  * @param {CliRunOptions} [options]
@@ -69,6 +75,7 @@ export async function runPmCli(options = {}) {
         data: { usage: rootHelp(version) },
         global,
         stdout,
+        stderr,
         version,
         human: rootHelp(version),
       });
@@ -80,6 +87,7 @@ export async function runPmCli(options = {}) {
         data: { version },
         global,
         stdout,
+        stderr,
         version,
         human: `pm ${version}\n`,
       });
@@ -91,6 +99,7 @@ export async function runPmCli(options = {}) {
         data: { usage: rootHelp(version) },
         global,
         stdout,
+        stderr,
         version,
         human: rootHelp(version),
       });
@@ -102,8 +111,10 @@ export async function runPmCli(options = {}) {
       data: result.data,
       global,
       stdout,
+      stderr,
       version,
       human: result.human,
+      warning: result.warning,
     });
   } catch (error) {
     return writeFailure({ command: command || "pm", error, global, stdout, stderr, version });
@@ -247,8 +258,8 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
   if (command === "otp") {
     const { options, requireMatch } = parseOtpArgs(args, global);
     const result = await callInjected(clients.otp?.get, [options], "pm otp");
-    const data = normalizeOtpResult(result, requireMatch);
-    return { command, data, human: renderOtp(data) };
+    const data = { ...normalizeOtpResult(result, requireMatch), deprecation: OTP_DEPRECATION };
+    return { command, data, human: renderOtp(data), warning: OTP_DEPRECATION.message };
   }
 
   if (command === "doctor:config") {
@@ -818,7 +829,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --label <id>           Add a REST metadata LabelID filter for injected clients\n  --label-id <id>        Alias for --label\n  --subject <text>       Add a REST metadata subject filter for injected clients\n  --from <text>          Add a REST metadata sender filter for injected clients\n  --sender <text>        Alias for --from\n  --to <text>            Add a REST metadata recipient filter for injected clients\n  --read | --unread      Add a REST metadata read-state filter for injected clients\n  --after <date|ts>      Add a REST metadata lower time bound\n  --before <date|ts>     Add a REST metadata upper time bound\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json    Deprecated; removal planned for next major\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --label <id>           Add a REST metadata LabelID filter for injected clients\n  --label-id <id>        Alias for --label\n  --subject <text>       Add a REST metadata subject filter for injected clients\n  --from <text>          Add a REST metadata sender filter for injected clients\n  --sender <text>        Alias for --from\n  --to <text>            Add a REST metadata recipient filter for injected clients\n  --read | --unread      Add a REST metadata read-state filter for injected clients\n  --after <date|ts>      Add a REST metadata lower time bound\n  --before <date|ts>     Add a REST metadata upper time bound\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  Deprecated: parse message bodies in user automation instead of relying on pm otp.\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
@@ -953,12 +964,13 @@ function clientOptions(global) {
 }
 
 /** @param {WriteSuccessOptions} options */
-function writeSuccess({ command, data, global, stdout, version, human }) {
+function writeSuccess({ command, data, global, stdout, stderr, version, human, warning }) {
   if (global.format === "json") {
     stdout.write(`${JSON.stringify(jsonEnvelope({ ok: true, command, data, version }))}\n`);
     return CLI_EXIT.OK;
   }
 
+  if (warning) stderr.write(`${warning}\n`);
   if (!global.quiet && human) stdout.write(human.endsWith("\n") ? human : `${human}\n`);
   return CLI_EXIT.OK;
 }

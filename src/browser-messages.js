@@ -26,7 +26,10 @@ const OTP_RE = /\b(?<code>\d{6})\b/u;
 const GITHUB_DEVICE_AUTH_RE = /\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\b/iu;
 const MAGIC_LINK_RE = /(?<link>https?:\/\/[^\s"'<>]+)/iu;
 
-/** @type {Readonly<Record<string, OtpProviderPreset>>} */
+/**
+ * @deprecated Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in user-owned automation. Removal is planned for the next major version.
+ * @type {Readonly<Record<string, OtpProviderPreset>>}
+ */
 export const OTP_PROVIDER_PRESETS = Object.freeze({
   generic: Object.freeze({ otpPattern: OTP_RE }),
   github: Object.freeze({ matchText: /github|noreply@github\.com/i, otpPattern: GITHUB_DEVICE_AUTH_RE }),
@@ -43,6 +46,7 @@ const OTP_PROVIDER_ALIASES = Object.freeze({
 });
 
 /**
+ * @deprecated Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in user-owned automation. Removal is planned for the next major version.
  * @param {unknown} text
  * @param {OtpExtractionOptions} [options]
  * @returns {string}
@@ -52,6 +56,7 @@ export function extractOtpCode(text, options = {}) {
 }
 
 /**
+ * @deprecated Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in user-owned automation. Removal is planned for the next major version.
  * @param {unknown} text
  * @param {OtpExtractionOptions} [options]
  * @returns {string}
@@ -62,6 +67,7 @@ export function extractFirstOtpCode(text, options = {}) {
 }
 
 /**
+ * @deprecated Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in user-owned automation. Removal is planned for the next major version.
  * @param {unknown} text
  * @param {OtpExtractionOptions} [options]
  * @returns {string}

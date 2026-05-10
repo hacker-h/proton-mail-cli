@@ -334,6 +334,7 @@ export class ProtonMailBrowserClient {
   }
 
   /**
+   * @deprecated Built-in OTP/link extraction is deprecated. Use getLatestMessage() or pm read, then parse message bodies in user-owned automation. Removal is planned for the next major version.
    * @param {BrowserClientOptions} [options]
    * @returns {Promise<BrowserResult>}
    */

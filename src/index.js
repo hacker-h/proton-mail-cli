@@ -1,12 +1,15 @@
 export { ProtonMailClient } from "./client.js";
 export {
   ProtonMailBrowserClient,
+  matchOpenAiEmail,
+  defaultSessionFile,
+} from "./browser-client.js";
+/** @deprecated Built-in OTP/link extraction exports are deprecated. Use mail read/list APIs and parse message bodies in user-owned automation. Removal is planned for the next major version. */
+export {
   OTP_PROVIDER_PRESETS,
   extractFirstLink,
   extractFirstOtpCode,
   extractOtpCode,
-  matchOpenAiEmail,
-  defaultSessionFile,
 } from "./browser-client.js";
 export { ProtonHttp } from "./http.js";
 export { FileSessionStore } from "./rest-session-store.js";
