@@ -1,3 +1,11 @@
+# [1.7.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.6.0...v1.7.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** add mail search command ([5b0edd7](https://github.com/hacker-h/proton-mail-cli/commit/5b0edd771a266e6712c597f50a56c1627d9cfc13))
+* **mail:** add preview filter helper ([11190bd](https://github.com/hacker-h/proton-mail-cli/commit/11190bd4f0b089037b187a2871e2a912a17c5f9b))
+
 # [1.6.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.5.1...v1.6.0) (2026-05-10)
 
 
