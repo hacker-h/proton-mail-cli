@@ -131,6 +131,36 @@ if (otp.success) {
 }
 ```
 
+### Configurable OTP and Link Extraction
+
+`extractOtpCode()` defaults to the existing OpenAI email match plus a generic 6-digit OTP pattern. Callers can override extraction with `pattern` / `otpPattern`, use named capture group `code`, or select a provider preset.
+
+```js
+const githubOtp = await client.extractOtpCode({ provider: "github" });
+console.log(githubOtp.code); // e.g. WDJB-MJHT
+
+const auth0Otp = await client.extractOtpCode({
+  matchText: /auth0|no-reply@auth0\.com/i,
+  pattern: /verification code:\s*(?<code>[A-Z0-9]{8})/i,
+});
+console.log(auth0Otp.code);
+
+const magicLink = await client.extractOtpCode({
+  matchText: /sign in|login/i,
+  provider: "magic-link-url",
+});
+console.log(magicLink.link);
+```
+
+Pure helpers are exported for already-loaded message bodies. String patterns are treated as regular expression source strings or `/source/flags` literals.
+
+```js
+import { extractFirstLink, extractFirstOtpCode } from "proton-mail-cli";
+
+const code = extractFirstOtpCode(bodyText, { provider: "generic" });
+const link = extractFirstLink(bodyText, { linkPattern: "Sign in: (?<link>https://\\S+)" });
+```
+
 ### Browser Client Methods
 
 - `loginAndSaveSession(options)`

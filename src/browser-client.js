@@ -2,7 +2,18 @@ import path from "node:path";
 import { chromium } from "playwright-core";
 import { performLogin, waitForManualLoginCompletion } from "./browser-auth.js";
 import { debugLog, getDebugEvents, ignoreWithDebug, isDebugLoggingEnabled } from "./browser-debug.js";
-import { extractFirstOtpCode, findMatchingMessage, matchOpenAiEmail, openMessage, scanInboxWithFallback, extractOpenedMessage } from "./browser-messages.js";
+import {
+  OTP_PROVIDER_PRESETS,
+  extractFirstLink,
+  extractFirstOtpCode,
+  extractOtpCode,
+  findMatchingMessage,
+  matchOpenAiEmail,
+  openMessage,
+  resolveOtpExtractionOptions,
+  scanInboxWithFallback,
+  extractOpenedMessage,
+} from "./browser-messages.js";
 import { dismissModals, hasAuthChallengeText, hasInboxIndicators, locateLoginEmailField, waitForInboxOrLogin } from "./browser-selectors.js";
 import {
   DEFAULT_SESSION_FILE,
@@ -51,6 +62,10 @@ export const MAIL_ALL_URL = "https://mail.proton.me/u/0/all-mail";
  *   browserFactory?: typeof chromium,
  *   debug?: boolean | Partial<EnabledDebugConfig>,
  *   matchText?: MessageMatcher,
+ *   provider?: string,
+ *   pattern?: string | RegExp,
+ *   otpPattern?: string | RegExp,
+ *   linkPattern?: string | RegExp,
  *   mailUrl?: string,
  *   folder?: string,
  *   limit?: number
@@ -323,24 +338,43 @@ export class ProtonMailBrowserClient {
    * @returns {Promise<BrowserResult>}
    */
   async extractOtpCode(options = {}) {
-    const matchText = options.matchText || /openai|noreply@openai\.com/i;
+    let extractionOptions;
+    try {
+      extractionOptions = resolveOtpExtractionOptions(options);
+    } catch (error) {
+      return resultWithError(error instanceof Error ? error.message : "Invalid OTP extraction options");
+    }
+
+    const matchText = options.matchText ?? (extractionOptions.providerPreset ? extractionOptions.matchText : /openai|noreply@openai\.com/i);
     const result = await this.getLatestMessage({ ...options, matchText });
     if (!result.success) {
       return result;
     }
 
     const message = result.message;
-    const code = extractFirstOtpCode(message?.bodyText);
-    if (!code) {
-      return resultWithError("Matching email found, but no 6-digit code was present", {
-        message,
-      });
+    let code = "";
+    let link = "";
+    try {
+      code = extractFirstOtpCode(message?.bodyText, extractionOptions);
+      link = extractionOptions.linkPattern ? extractFirstLink(message?.bodyText, extractionOptions) : "";
+    } catch (error) {
+      return resultWithError(error instanceof Error ? error.message : "Invalid OTP extraction pattern", { message });
+    }
+
+    if (!code && !link) {
+      return resultWithError(
+        extractionOptions.linkPattern
+          ? "Matching email found, but no OTP code or link was present"
+          : "Matching email found, but no 6-digit code was present",
+        { message }
+      );
     }
 
     return {
       success: true,
       sessionValid: true,
       code,
+      ...(extractionOptions.linkPattern ? { link } : {}),
       message,
     };
   }
@@ -521,7 +555,7 @@ export class ProtonMailBrowserClient {
   }
 }
 
-export { extractFirstOtpCode, matchOpenAiEmail };
+export { OTP_PROVIDER_PRESETS, extractFirstLink, extractFirstOtpCode, extractOtpCode, matchOpenAiEmail };
 
 export function defaultSessionFile() {
   return DEFAULT_SESSION_FILE;
@@ -610,7 +644,10 @@ async function addNavigatorPatch(context) {
 
 export const __internal = {
   defaultSessionFile: DEFAULT_SESSION_FILE,
+  OTP_PROVIDER_PRESETS,
+  extractFirstLink,
   extractFirstOtpCode,
+  extractOtpCode,
   findMatchingMessage,
   hasAuthChallengeText,
   hasInboxIndicators,

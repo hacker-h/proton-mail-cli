@@ -15,16 +15,61 @@ import { delay, normalizeText, truncate } from "./browser-utils.js";
  *   navigateToInbox: (page: Page, url?: string) => Promise<{ state: string, url?: string }>
  * }} ScanFallbackOptions
  * @typedef {string | RegExp | ((message: MessagePreview) => boolean)} MessageMatcher
+ * @typedef {string | RegExp} ExtractionPattern
+ * @typedef {{ matchText?: MessageMatcher, otpPattern?: RegExp, linkPattern?: RegExp }} OtpProviderPreset
+ * @typedef {{ provider?: string, pattern?: ExtractionPattern, otpPattern?: ExtractionPattern, linkPattern?: ExtractionPattern, matchText?: MessageMatcher }} OtpExtractionOptions
+ * @typedef {{ providerPreset: OtpProviderPreset | null, matchText?: MessageMatcher, otpPattern: RegExp, linkPattern?: RegExp }} ResolvedOtpExtractionOptions
  */
 
-const OTP_RE = /\b(\d{6})\b/;
+const OPENAI_MATCH_RE = /openai|noreply@openai\.com/i;
+const OTP_RE = /\b(?<code>\d{6})\b/u;
+const GITHUB_DEVICE_AUTH_RE = /\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\b/iu;
+const MAGIC_LINK_RE = /(?<link>https?:\/\/[^\s"'<>]+)/iu;
+
+/** @type {Readonly<Record<string, OtpProviderPreset>>} */
+export const OTP_PROVIDER_PRESETS = Object.freeze({
+  generic: Object.freeze({ otpPattern: OTP_RE }),
+  github: Object.freeze({ matchText: /github|noreply@github\.com/i, otpPattern: GITHUB_DEVICE_AUTH_RE }),
+  magicLink: Object.freeze({ linkPattern: MAGIC_LINK_RE }),
+});
+
+/** @type {Readonly<Record<string, string>>} */
+const OTP_PROVIDER_ALIASES = Object.freeze({
+  "generic-6-digit": "generic",
+  "github-device-auth": "github",
+  "magic-link": "magicLink",
+  "magic-link-url": "magicLink",
+  magiclink: "magicLink",
+});
 
 /**
  * @param {unknown} text
+ * @param {OtpExtractionOptions} [options]
  * @returns {string}
  */
-export function extractFirstOtpCode(text) {
-  return String(text || "").match(OTP_RE)?.[1] || "";
+export function extractOtpCode(text, options = {}) {
+  return extractFirstOtpCode(text, options);
+}
+
+/**
+ * @param {unknown} text
+ * @param {OtpExtractionOptions} [options]
+ * @returns {string}
+ */
+export function extractFirstOtpCode(text, options = {}) {
+  const extractionOptions = resolveOtpExtractionOptions(options);
+  return extractFirstPatternValue(text, extractionOptions.otpPattern, ["code"]);
+}
+
+/**
+ * @param {unknown} text
+ * @param {OtpExtractionOptions} [options]
+ * @returns {string}
+ */
+export function extractFirstLink(text, options = {}) {
+  const extractionOptions = resolveOtpExtractionOptions(options);
+  const value = extractFirstPatternValue(text, extractionOptions.linkPattern || MAGIC_LINK_RE, ["link", "url"]);
+  return trimTrailingUrlPunctuation(value);
 }
 
 /**
@@ -32,7 +77,121 @@ export function extractFirstOtpCode(text) {
  * @returns {boolean}
  */
 export function matchOpenAiEmail(preview) {
-  return /openai|noreply@openai\.com/i.test(String(preview || ""));
+  return testPattern(OPENAI_MATCH_RE, String(preview || ""));
+}
+
+/**
+ * @param {OtpExtractionOptions} [options]
+ * @returns {ResolvedOtpExtractionOptions}
+ */
+export function resolveOtpExtractionOptions(options = {}) {
+  const providerPreset = resolveProviderPreset(options.provider);
+  /** @param {string} key */
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(options, key);
+  const otpPatternInput = hasOwn("otpPattern")
+    ? options.otpPattern
+    : hasOwn("pattern")
+      ? options.pattern
+      : providerPreset?.otpPattern ?? OTP_RE;
+  const linkPatternInput = hasOwn("linkPattern") ? options.linkPattern : providerPreset?.linkPattern;
+
+  return {
+    providerPreset,
+    matchText: options.matchText ?? providerPreset?.matchText,
+    otpPattern: normalizeExtractionPattern(otpPatternInput),
+    linkPattern: linkPatternInput === undefined ? undefined : normalizeExtractionPattern(linkPatternInput),
+  };
+}
+
+/**
+ * @param {unknown} provider
+ * @returns {OtpProviderPreset | null}
+ */
+function resolveProviderPreset(provider) {
+  if (!provider) return null;
+  const providerName = String(provider).trim();
+  const presetName = OTP_PROVIDER_PRESETS[providerName]
+    ? providerName
+    : OTP_PROVIDER_ALIASES[providerName.toLowerCase()];
+  if (!presetName || !OTP_PROVIDER_PRESETS[presetName]) {
+    throw new Error(`Unknown OTP provider preset: ${providerName}`);
+  }
+  return OTP_PROVIDER_PRESETS[presetName];
+}
+
+/**
+ * @param {unknown} pattern
+ * @returns {RegExp}
+ */
+function normalizeExtractionPattern(pattern) {
+  if (pattern instanceof RegExp) {
+    return cloneStatelessRegExp(pattern);
+  }
+  if (typeof pattern === "string") {
+    const trimmed = pattern.trim();
+    if (!trimmed) {
+      throw new Error("OTP extraction pattern must be a RegExp or non-empty string");
+    }
+    const literalMatch = /^\/([\s\S]+)\/([a-z]*)$/u.exec(trimmed);
+    if (literalMatch) {
+      const [, source, flags] = literalMatch;
+      return new RegExp(source, normalizeExtractionFlags(flags));
+    }
+    return new RegExp(trimmed, "u");
+  }
+  throw new Error("OTP extraction pattern must be a RegExp or non-empty string");
+}
+
+/** @param {RegExp} pattern */
+function cloneStatelessRegExp(pattern) {
+  return new RegExp(pattern.source, normalizeExtractionFlags(pattern.flags));
+}
+
+/** @param {string} flags */
+function normalizeExtractionFlags(flags) {
+  /** @type {string[]} */
+  const output = [];
+  for (const flag of String(flags || "")) {
+    if (!"dgimsuvy".includes(flag) || flag === "g" || flag === "y" || output.includes(flag)) continue;
+    output.push(flag);
+  }
+  if (!output.includes("u") && !output.includes("v")) output.push("u");
+  return output.join("");
+}
+
+/**
+ * @param {unknown} text
+ * @param {RegExp} pattern
+ * @param {string[]} groupNames
+ * @returns {string}
+ */
+function extractFirstPatternValue(text, pattern, groupNames) {
+  const match = cloneStatelessRegExp(pattern).exec(String(text || ""));
+  if (!match) return "";
+
+  for (const groupName of groupNames) {
+    const value = match.groups?.[groupName];
+    if (value) return value;
+  }
+
+  for (let index = 1; index < match.length; index += 1) {
+    if (match[index]) return match[index];
+  }
+
+  return match[0] || "";
+}
+
+/** @param {string} value */
+function trimTrailingUrlPunctuation(value) {
+  return String(value || "").replace(/[.,;:!?]+$/u, "");
+}
+
+/**
+ * @param {RegExp} pattern
+ * @param {string} value
+ */
+function testPattern(pattern, value) {
+  return cloneStatelessRegExp(pattern).test(value);
 }
 
 /**
@@ -108,7 +267,7 @@ export function findMatchingMessage(messages, matchText) {
     if (typeof matchText === "string" && preview.includes(matchText)) {
       return message;
     }
-    if (matchText instanceof RegExp && matchText.test(preview)) {
+    if (matchText instanceof RegExp && testPattern(matchText, preview)) {
       return message;
     }
     if (typeof matchText === "function" && matchText(message)) {
