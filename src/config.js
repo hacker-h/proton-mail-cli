@@ -13,11 +13,11 @@ const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu;
  * @typedef {(filePath: string) => boolean} ExistsLike
  * @typedef {(command: string) => string} RunCommandLike
  * @typedef {{ config?: string | null, session?: string | null, timeout?: number | null }} CliGlobalConfig
- * @typedef {{ sessionFile?: unknown, session?: unknown, timeoutSeconds?: unknown, timeout?: unknown }} CliConfigFileValues
+ * @typedef {{ sessionFile?: unknown, session?: unknown, restSessionFile?: unknown, restSession?: unknown, timeoutSeconds?: unknown, timeout?: unknown }} CliConfigFileValues
  * @typedef {{ value: string, source: string, error?: string }} SecretResult
  * @typedef {{ path: string, exists: boolean, loaded: boolean, error: string | null }} ResolvedConfigFile
- * @typedef {{ sessionFile: string, timeout: number | null, username: string, password: string }} ResolvedConfigValues
- * @typedef {{ config: string, sessionFile: string, timeout: string, username: string, password: string }} ResolvedConfigSources
+ * @typedef {{ sessionFile: string, restSessionFile: string, timeout: number | null, username: string, password: string }} ResolvedConfigValues
+ * @typedef {{ config: string, sessionFile: string, restSessionFile: string, timeout: string, username: string, password: string }} ResolvedConfigSources
  * @typedef {{ username: string | null, password: string | null }} ResolvedConfigErrors
  * @typedef {{ configFile: ResolvedConfigFile, values: ResolvedConfigValues, sources: ResolvedConfigSources, errors: ResolvedConfigErrors }} ResolvedCliConfig
  * @typedef {{ exists: boolean, loaded: boolean, config: CliConfigFileValues, error: string | null }} LoadedConfigFile
@@ -28,6 +28,7 @@ const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu;
 export const CONFIG_ENV = Object.freeze({
   configFile: "PROTONMAIL_CONFIG_FILE",
   sessionFile: "PROTONMAIL_SESSION_FILE",
+  restSessionFile: "PROTONMAIL_REST_SESSION_FILE",
   timeout: "PROTONMAIL_TIMEOUT_SECONDS",
   username: "PROTONMAIL_USERNAME",
   password: "PROTONMAIL_PASSWORD",
@@ -61,6 +62,7 @@ export function resolveCliConfig({ global = {}, env = process.env, readFile = fs
   const fileConfig = configFile.config;
 
   const sessionFromFile = stringValue(fileConfig.sessionFile ?? fileConfig.session);
+  const restSessionFromFile = stringValue(fileConfig.restSessionFile ?? fileConfig.restSession);
   const timeoutFromFile = positiveInteger(fileConfig.timeoutSeconds ?? fileConfig.timeout, null);
 
   const username = resolveSecret(CONFIG_ENV.username, { env, readFile, runCommand });
@@ -72,6 +74,7 @@ export function resolveCliConfig({ global = {}, env = process.env, readFile = fs
       sessionFromFile ||
       defaultSessionFilePath(env)
   );
+  const restSessionFile = stringValue(env[CONFIG_ENV.restSessionFile]) || restSessionFromFile;
   const timeout = global.timeout || positiveInteger(env[CONFIG_ENV.timeout], null) || timeoutFromFile;
 
   return {
@@ -83,6 +86,7 @@ export function resolveCliConfig({ global = {}, env = process.env, readFile = fs
     },
     values: {
       sessionFile,
+      restSessionFile: restSessionFile ? path.resolve(restSessionFile) : "",
       timeout,
       username: username.value,
       password: password.value,
@@ -90,6 +94,7 @@ export function resolveCliConfig({ global = {}, env = process.env, readFile = fs
     sources: {
       config: global.config ? "flag" : env[CONFIG_ENV.configFile] ? "env" : configFile.exists ? "default" : "default-missing",
       sessionFile: global.session ? "flag" : env[CONFIG_ENV.sessionFile] ? "env" : sessionFromFile ? "config" : "default",
+      restSessionFile: env[CONFIG_ENV.restSessionFile] ? "env" : restSessionFromFile ? "config" : "missing",
       timeout: global.timeout ? "flag" : env[CONFIG_ENV.timeout] ? "env" : timeoutFromFile ? "config" : "default",
       username: username.source,
       password: password.source,
@@ -113,6 +118,7 @@ export function doctorConfig(global = {}, options = {}) {
     configFile: resolved.configFile,
     paths: {
       sessionFile: resolved.values.sessionFile,
+      restSessionFile: resolved.values.restSessionFile,
     },
     sources: resolved.sources,
     credentials: {
@@ -137,6 +143,7 @@ export async function doctorSession(global = {}, clients = {}, options = {}) {
   const request = {
     config: redactedConfig(resolved),
     sessionFile: resolved.values.sessionFile,
+    restSessionFile: resolved.values.restSessionFile,
     timeout: resolved.values.timeout,
   };
 

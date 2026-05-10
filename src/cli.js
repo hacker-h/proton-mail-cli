@@ -15,7 +15,7 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient, doctor?: CliDoctorClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
- * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
  * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
@@ -486,6 +486,7 @@ function classifyMailFailure(result) {
   const message = String(result.error || "");
   if (/No matching Proton Mail message found|No matching Proton Mail messages found/iu.test(message)) return "no_match";
   if (/browser:index:N refs/iu.test(message)) return "invalid_message_ref";
+  if (/REST metadata filters require/iu.test(message)) return "rest_session_missing";
   if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
   if (/credential|auth|login/iu.test(message)) return "auth_error";
   return "upstream_failure";
@@ -495,6 +496,7 @@ function classifyMailFailure(result) {
 function mailFailureCode(status) {
   if (status === "no_match") return "NO_MATCH";
   if (status === "invalid_message_ref") return "INVALID_MESSAGE_REF";
+  if (status === "rest_session_missing") return "REST_SESSION_REQUIRED";
   if (status === "session_expired") return "SESSION_EXPIRED";
   if (status === "auth_error") return "AUTH_REQUIRED";
   return "MAIL_COMMAND_FAILED";
@@ -504,6 +506,7 @@ function mailFailureCode(status) {
 function mailFailureMessage(status) {
   if (status === "no_match") return "No matching Proton Mail message found";
   if (status === "invalid_message_ref") return "pm read requires a browser:index:N ref from pm ls or pm mail search";
+  if (status === "rest_session_missing") return "REST metadata filters require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config";
   if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
   if (status === "auth_error") return "Proton Mail credentials or session are required";
   return "Proton Mail command failed";
@@ -942,6 +945,7 @@ function clientOptions(global) {
     timeout: resolved.values.timeout,
     config: resolved.configFile.path,
     session: resolved.values.sessionFile,
+    restSessionFile: resolved.values.restSessionFile,
     quiet: global.quiet,
     verbose: global.verbose,
     format: global.format,

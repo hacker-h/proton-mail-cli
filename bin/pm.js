@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
+import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { extractOtpWithPolling } from "../src/otp-runner.js";
+import { FileSessionStore } from "../src/rest-session-store.js";
 
 const exitCode = await runPmCli({
   argv: process.argv.slice(2),
@@ -21,9 +23,32 @@ const exitCode = await runPmCli({
 process.exitCode = exitCode;
 
 async function listMailFromBrowser(options) {
+  if (options.metadataFilter) return listMailFromRest(options);
   const client = browserClient(options);
   const result = await client.getInboxMessages(browserOptions(options));
   return { ...result, source: "browser" };
+}
+
+async function listMailFromRest(options) {
+  if (!options.restSessionFile) {
+    return {
+      success: false,
+      source: "rest",
+      error: "REST metadata filters require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config",
+    };
+  }
+  const client = new ProtonMailClient({
+    sessionStore: new FileSessionStore(options.restSessionFile),
+    timeoutMs: options.timeout ? options.timeout * 1000 : undefined,
+  });
+  const result = await client.getMessageMetadata(options.metadataFilter, 0, options.limit || undefined);
+  return {
+    success: true,
+    source: "rest",
+    total: result.total,
+    stale: result.stale,
+    messages: result.messages,
+  };
 }
 
 async function latestMailFromBrowser(options) {

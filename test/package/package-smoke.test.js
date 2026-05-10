@@ -47,10 +47,10 @@ describe("installed pm package smoke", () => {
     const importCheck = run(process.execPath, [
       "--input-type=module",
       "--eval",
-      "import { ProtonMailClient, ProtonMailBrowserClient, buildMailMetadataFilter } from 'proton-mail-cli'; console.log(`${typeof ProtonMailClient}:${typeof ProtonMailBrowserClient}:${typeof buildMailMetadataFilter}`);",
+      "import { ProtonMailClient, ProtonMailBrowserClient, FileSessionStore, buildMailMetadataFilter } from 'proton-mail-cli'; console.log(`${typeof ProtonMailClient}:${typeof ProtonMailBrowserClient}:${typeof FileSessionStore}:${typeof buildMailMetadataFilter}`);",
     ], { cwd: appDir, env });
     assert.equal(importCheck.status, 0, importCheck.stderr);
-    assert.equal(importCheck.stdout, "function:function:function\n");
+    assert.equal(importCheck.stdout, "function:function:function:function\n");
     assert.equal(importCheck.stderr, "");
 
     const failure = run(pm, ["read", "msg1", "--json"], { cwd: appDir, env });
@@ -73,6 +73,11 @@ describe("installed pm package smoke", () => {
     assert.equal(mailDateUsage.status, 1, mailDateUsage.stderr);
     assert.equal(mailDateUsage.stdout, "");
     assert.equal(JSON.parse(mailDateUsage.stderr).error.code, "INVALID_DATE");
+
+    const restSessionUsage = run(pm, ["ls", "--subject", "Invoice", "--require-match", "--json"], { cwd: appDir, env });
+    assert.equal(restSessionUsage.status, 1, restSessionUsage.stderr);
+    assert.equal(restSessionUsage.stdout, "");
+    assert.equal(JSON.parse(restSessionUsage.stderr).error.code, "REST_SESSION_REQUIRED");
 
     const searchUsage = run(pm, ["mail", "search", "--json"], { cwd: appDir, env });
     assert.equal(searchUsage.status, 1, searchUsage.stderr);
