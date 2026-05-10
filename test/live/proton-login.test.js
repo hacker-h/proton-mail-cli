@@ -54,7 +54,7 @@ describe("live Proton login", testOptions, () => {
     assert.equal(login.success, true, formatLiveFailure(login));
     assert.equal(login.sessionValid, true);
     assert.equal(fs.existsSync(sessionFile), true);
-    if (seededSession || configuredSessionFile) {
+    if ((seededSession || configuredSessionFile) && !freshLoginAllowed) {
       assert.equal(login.loginMethod, "session", "Seeded CI sessions must be reused without credential login");
     }
 

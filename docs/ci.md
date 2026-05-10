@@ -30,14 +30,14 @@ This package is currently private, so release automation creates GitHub Releases
 
 ## Live Proton Regression
 
-The live workflow is defined in `.github/workflows/live-proton.yml` and runs for trusted same-repository pull requests, pushes to `main`, schedule, or manual dispatch.
+The live workflow is defined in `.github/workflows/live-proton.yml` and runs only for trusted secret-bearing contexts: pushes or manual dispatches by the repository owner, same-repository pull requests opened by the repository owner, Dependabot pull requests, and schedule.
 
 Preferred repository secret:
 
 - `PROTONMAIL_SESSION_JSON`
 - `PROTONMAIL_SESSION_CACHE_KEY`
 
-Fallback repository secrets for explicitly allowed manual fresh-login runs:
+Fallback repository secrets for trusted fresh-login runs:
 
 - `PROTONMAIL_USERNAME`
 - `PROTONMAIL_PASSWORD`
@@ -58,7 +58,7 @@ The live test verifies:
 
 If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. This is the preferred and expected scheduled-CI mode because fresh credential login may trigger Proton CAPTCHA, 2FA/TOTP, or other risk checks.
 
-Scheduled CI intentionally does not perform fresh username/password login when `PROTONMAIL_SESSION_JSON` is missing. A maintainer can manually dispatch the workflow with `allow_fresh_login=true`, but that should be rare and should be treated as potentially causing Proton risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
+Trusted owner and Dependabot runs may perform fresh username/password login when the seeded or cached session is missing or expired. Scheduled CI intentionally stays session-only. Fresh login should still be treated as potentially causing Proton risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
 
 ## Pull Request Live Login Cache
 
@@ -72,7 +72,7 @@ Cache behavior:
 - cache contents: encrypted minimized Playwright storage state
 - encryption: AES-256-GCM via `PROTONMAIL_SESSION_CACHE_KEY`
 - fallback: `PROTONMAIL_SESSION_JSON` when no cache exists for the current branch/bucket
-- fresh password login: disabled unless a maintainer manually dispatches with `allow_fresh_login=true`
+- fresh password login: enabled only for owner-launched runs, owner same-repository PRs, and Dependabot PRs
 
 The cache is intentionally short-lived. New branch buckets fall back to the repository session secret, then save a refreshed encrypted session for later runs in the same six-hour window.
 
