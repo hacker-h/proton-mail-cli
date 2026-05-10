@@ -148,6 +148,8 @@ Required fields depend on which methods the store implements:
 
 Do not log or commit this object. Cookies and refresh payloads are secret-bearing authentication material.
 
+The installed `pm` binary can read this local-file shape from `PROTONMAIL_REST_SESSION_FILE` or `restSessionFile` in the CLI config file for metadata-filtered `pm ls` calls.
+
 ## Reference Implementation
 
 `examples/memory-session-store.js` provides a dependency-free in-memory implementation that is suitable for unit tests and short-lived scripts:
