@@ -1,3 +1,11 @@
+# [1.5.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.4.0...v1.5.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** wire otp polling flag ([41890bc](https://github.com/hacker-h/proton-mail-cli/commit/41890bc05a5c5dc7c392239ff6a966c9098bcc58))
+* **otp:** add polling runner ([4112b53](https://github.com/hacker-h/proton-mail-cli/commit/4112b5326986888debc2a2878cb102efd9035da3))
+
 # [1.4.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.3.0...v1.4.0) (2026-05-10)
 
 
