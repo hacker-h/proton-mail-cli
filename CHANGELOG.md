@@ -1,3 +1,11 @@
+# [1.8.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.7.0...v1.8.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** add browser-ref mail read ([6732b3a](https://github.com/hacker-h/proton-mail-cli/commit/6732b3a96fef814b229e27173c4c6271800e63be))
+* **mail:** parse browser message refs ([858fbce](https://github.com/hacker-h/proton-mail-cli/commit/858fbcec7d9a529632550d85ef94d1b8860634b0))
+
 # [1.7.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.6.0...v1.7.0) (2026-05-10)
 
 
