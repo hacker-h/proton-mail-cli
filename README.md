@@ -3,7 +3,7 @@
 Automation-friendly Proton Mail CLI and reusable client package with two layers:
 
 1. `ProtonMailClient` for REST/API access when you already have a valid cookie session store
-2. `ProtonMailBrowserClient` for Playwright-based login, saved-session reuse, plaintext inbox/message extraction, and OTP retrieval
+2. `ProtonMailBrowserClient` for Playwright-based login, saved-session reuse, and plaintext inbox/message extraction
 
 The browser client is the canonical dependency surface when other local projects need to log into Proton Mail and read email content programmatically.
 
@@ -29,8 +29,6 @@ pm ls --match github --limit 5 --json
 pm mail latest
 pm mail search --match github --json
 pm read browser:index:0
-pm otp --match openai --json
-pm otp --provider github --poll-interval 2 --timeout 60 --require-match
 ```
 
 Global flags:
@@ -75,22 +73,48 @@ Command-specific mail flags:
 
 The installed `pm ls` uses REST metadata listing when metadata filters are present and `PROTONMAIL_REST_SESSION_FILE` or `restSessionFile` is configured; otherwise mail commands remain browser-backed. REST metadata filters are also surfaced in injected client options as `metadataFilter` for callers that wire `ProtonMailClient.getMessageMetadata()`. Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
 
-### OTP and Link Extraction
+### Deprecated: Built-In OTP and Link Extraction
 
-`pm otp` scans Proton Mail through the browser backend, using the configured saved session from `--session` / `PROTONMAIL_SESSION_FILE` or the OS cache default. It prints only the extracted code or link in human mode; JSON mode uses the standard envelope.
+`pm otp` and the exported OTP/link extraction helpers are deprecated and planned for removal in the next major version. `proton-mail-cli` provides mail access; parsing message bodies belongs in user-owned automation because provider-specific OTP formats are brittle and expensive to maintain.
+
+Existing `pm otp` behavior remains available during the deprecation window. JSON output includes deprecation metadata; human output prints a deprecation warning to stderr.
 
 ```bash
 pm otp --match openai --json
-pm otp --provider github --poll-interval 2 --timeout 60 --require-match
-pm otp --match '/github/i' --pattern '\\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\\b'
-pm otp --provider magic-link --link-pattern 'https://example.com/\\S+' --json
 ```
 
-Command-specific flags:
+Track removal timing in [docs/deprecations.md](docs/deprecations.md).
+
+### Client-Side OTP Parsing Example
+
+Use mail access APIs and parse the message body in your own script. The example supports an artificial fixture for fast e2e-style tests without sending real email or stressing providers.
+
+```bash
+node examples/client-side-otp.js --fixture examples/fixtures/otp-message.json --json
+```
+
+For real mailbox access, the same script can read the latest message and apply a user-owned parser:
+
+```bash
+node examples/client-side-otp.js --match github --session "$PROTONMAIL_SESSION_FILE" --pattern '\b(?<code>\d{6})\b' --json
+```
+
+Fixture shape:
+
+```json
+{
+  "message": {
+    "subject": "Example verification",
+    "bodyText": "Your example verification code is 246810."
+  }
+}
+```
+
+Deprecated `pm otp` flags retained until the next major version:
 
 | Flag | Purpose |
 |------|---------|
-| `--provider <name>` | Use a provider preset such as `generic`, `github`, or `magic-link`. |
+| `--provider <name>` | Deprecated provider preset such as `generic`, `github`, or `magic-link`. |
 | `--match <text\|/re/i>` | Select the latest email whose preview contains text or matches a regex literal. |
 | `--pattern <pattern>` | Override the OTP extraction regex. Named capture group `code` is preferred. |
 | `--otp-pattern <pattern>` | Alias for an explicit OTP extraction regex. |
@@ -100,7 +124,7 @@ Command-specific flags:
 | `--poll-interval <seconds>` | Retry no-match and matched-without-token results until `--timeout` elapses. |
 | `--require-match` | Exit non-zero when no matching email/token/link is found. |
 
-Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--poll-interval` enables built-in polling and uses `--timeout` as the total wait budget, defaulting to 60 seconds if no timeout is configured. `--require-match` turns no match, matched-without-token, timeout, session expiry, and auth/setup failures into CI-friendly failures. OTP JSON intentionally omits message bodies, previews, browser handles, and debug events. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
+Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--poll-interval` enables built-in polling and uses `--timeout` as the total wait budget, defaulting to 60 seconds if no timeout is configured. `--require-match` turns no match, matched-without-token, timeout, session expiry, and auth/setup failures into CI-friendly failures. OTP JSON intentionally omits message bodies, previews, browser handles, and debug events. OTP values and magic links are command output by design; do not run this deprecated command with public logs unless those outputs are masked or captured privately.
 
 Alias policy:
 
@@ -185,15 +209,11 @@ if (!latest.success) {
 console.log(latest.message.subject);
 console.log(latest.message.bodyText);
 
-const otp = await client.extractOtpCode();
-if (otp.success) {
-  console.log(otp.code);
-}
 ```
 
-### Configurable OTP and Link Extraction
+### Deprecated Configurable OTP and Link Extraction
 
-`extractOtpCode()` defaults to the existing OpenAI email match plus a generic 6-digit OTP pattern. Callers can override extraction with `pattern` / `otpPattern`, use named capture group `code`, or select a provider preset.
+`extractOtpCode()` and related helpers are deprecated for removal in the next major version. Prefer `getLatestMessage()` / `pm read` plus user-owned parsing logic. They currently default to the existing OpenAI email match plus a generic 6-digit OTP pattern, and callers can override extraction with `pattern` / `otpPattern`, use named capture group `code`, or select a provider preset.
 
 ```js
 const githubOtp = await client.extractOtpCode({ provider: "github" });
@@ -226,7 +246,7 @@ const link = extractFirstLink(bodyText, { linkPattern: "Sign in: (?<link>https:/
 - `loginAndSaveSession(options)`
 - `getInboxMessages(options)`
 - `getLatestMessage(options)`
-- `extractOtpCode(options)`
+- `extractOtpCode(options)` Deprecated; removal planned for the next major version.
 
 ### Browser Client Runtime Notes
 
@@ -301,7 +321,7 @@ See [docs/session-store.md](docs/session-store.md) for the full method contract,
 
 | Area | Methods |
 |------|---------|
-| Browser automation | `ProtonMailBrowserClient.loginAndSaveSession`, `getInboxMessages`, `getLatestMessage`, `extractOtpCode` |
+| Browser automation | `ProtonMailBrowserClient.loginAndSaveSession`, `getInboxMessages`, `getLatestMessage`; deprecated: `extractOtpCode` |
 | Auth/User | `getUser`, `getAddresses`, `getKeySalts` |
 | Messages (read) | `getMessage`, `getMessageMetadata`, `getAllMessageMetadata`, `getMessageIds`, `getAllMessageIds`, `getMessageCount` |
 | Messages (actions) | `deleteMessages`, `markMessagesRead`, `markMessagesUnread`, `labelMessages`, `unlabelMessages`, `markMessagesForwarded`, `markMessagesUnforwarded` |
