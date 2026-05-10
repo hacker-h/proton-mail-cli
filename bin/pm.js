@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { runPmCli } from "../src/cli.js";
+import { filterMailMessages } from "../src/mail-runner.js";
 import { extractOtpWithPolling } from "../src/otp-runner.js";
 
 const exitCode = await runPmCli({
@@ -9,6 +10,7 @@ const exitCode = await runPmCli({
     mail: {
       list: listMailFromBrowser,
       latest: latestMailFromBrowser,
+      search: searchMailFromBrowser,
     },
     otp: {
       get: extractOtpFromBrowser,
@@ -27,6 +29,19 @@ async function latestMailFromBrowser(options) {
   const client = browserClient(options);
   const result = await client.getLatestMessage(browserOptions(options));
   return { ...result, source: "browser" };
+}
+
+async function searchMailFromBrowser(options) {
+  const client = browserClient(options);
+  const result = await client.getInboxMessages(browserOptions(options));
+  if (result?.success === false) return { ...result, source: "browser" };
+
+  const messages = Array.isArray(result?.messages) ? filterMailMessages(result.messages, options.matchText) : [];
+  return {
+    ...result,
+    source: "browser",
+    messages,
+  };
 }
 
 async function extractOtpFromBrowser(options) {

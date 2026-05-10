@@ -16,6 +16,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm 9\.9\.9/u);
     assert.match(io.stdoutText(), /pm ls/u);
     assert.match(io.stdoutText(), /pm mail latest/u);
+    assert.match(io.stdoutText(), /pm mail search --match <text>/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
     assert.match(io.stdoutText(), /pm otp --match <text> --json/u);
     assert.match(io.stdoutText(), /pm doctor config --json/u);
@@ -52,6 +53,7 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["list"]).command, "mail:list");
     assert.deepEqual(parseArgv(["inbox"]).command, "mail:list");
     assert.deepEqual(parseArgv(["mail", "list"]).command, "mail:list");
+    assert.deepEqual(parseArgv(["mail", "search", "--match", "github"]).command, "mail:search");
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
     assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
     assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
@@ -253,6 +255,43 @@ describe("pm CLI runner", () => {
     assert.equal(envelopeText.includes("Private body"), false);
     assert.equal(envelopeText.includes("debugEvents"), false);
     assert.equal(latest.mock.calls[0].arguments[0].matchText, "Preview");
+  });
+
+  it("dispatches mail search with required match filters", async () => {
+    const io = createIo();
+    const search = mock.fn(async () => ({
+      success: true,
+      source: "browser",
+      messages: [
+        { index: 1, preview: "GitHub sign-in link" },
+      ],
+    }));
+
+    assert.equal(await runPmCli({
+      argv: ["mail", "search", "--match", "github", "--folder", "all-mail", "--limit", "4", "--json"],
+      clients: { mail: { search } },
+      ...io,
+    }), CLI_EXIT.OK);
+
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.command, "mail:search");
+    assert.equal(envelope.data.status, "matched");
+    assert.equal(envelope.data.count, 1);
+    assert.deepEqual(envelope.data.messages, [{ ref: "browser:index:1", index: 1, preview: "GitHub sign-in link" }]);
+    const options = search.mock.calls[0].arguments[0];
+    assert.equal(options.matchText, "github");
+    assert.equal(options.folder, "all-mail");
+    assert.equal(options.limit, 4);
+  });
+
+  it("requires --match for mail search", async () => {
+    const io = createIo();
+    const search = mock.fn(async () => ({ messages: [] }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "search", "--json"], clients: { mail: { search } }, ...io }), CLI_EXIT.USAGE);
+    const envelope = JSON.parse(io.stderrText());
+    assert.equal(envelope.error.code, "MISSING_MATCH");
+    assert.equal(search.mock.callCount(), 0);
   });
 
   it("classifies mail latest no-match and redacts relaxed failures", async () => {
