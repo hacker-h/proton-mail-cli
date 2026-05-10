@@ -111,6 +111,17 @@ Search-like commands must distinguish these states in JSON:
 
 Default no-match behavior should be a successful empty result when absence is expected. `--require-match` turns no-match, matched-without-token, and timeout into failures suitable for CI.
 
+`pm otp` follows this contract for OTP and link extraction. In human mode it prints only the extracted code or link; in JSON mode it includes stable booleans such as `codeFound` and `linkFound` plus `status`. The command may reveal the requested OTP/link by design, so tests and logs must never print message bodies, session state, credentials, or unrelated mailbox metadata.
+
+`pm otp` command-specific flags:
+
+- `--provider <name>` selects a provider preset.
+- `--match <text|/re/i>` filters email previews before extraction.
+- `--pattern <pattern>` or `--otp-pattern <pattern>` overrides OTP extraction.
+- `--link-pattern <pattern>` extracts links with named capture group `link` or `url` preferred.
+- `--folder <name>` and `--limit <count>` control browser scanning scope.
+- `--require-match` turns absence into a failure exit for CI jobs.
+
 ## Config and Secrets
 
 Configuration resolves in this order:
