@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.5.1...v1.6.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** add browser-backed mail list ([3ee8047](https://github.com/hacker-h/proton-mail-cli/commit/3ee8047f82132be01f8e3fac02684200883da2ac))
+
 ## [1.5.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.5.0...v1.5.1) (2026-05-10)
 
 
