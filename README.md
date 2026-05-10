@@ -38,7 +38,7 @@ Global flags:
 | Flag | Purpose |
 |------|---------|
 | `--json` | Emits the stable JSON envelope. Equivalent to `--format json`. |
-| `--format <human\|json>` | Selects human output or JSON output. |
+| `--format <human\|json\|table>` | Selects human output, table output, or JSON output. |
 | `--timeout <seconds>` | Passes a positive integer timeout to injected clients. |
 | `--config <path>` | Reads CLI config from a JSON file. Overrides `PROTONMAIL_CONFIG_FILE`. |
 | `--session <path>` | Uses a Proton session state path. Overrides env and config files. |
@@ -51,6 +51,7 @@ Global flags:
 
 ```bash
 pm ls --limit 10
+pm ls --format table
 pm ls --match '/github/i' --folder all-mail --json
 pm mail search --match github --require-match --json
 pm mail latest --match openai --require-match --json
@@ -66,7 +67,7 @@ Command-specific mail flags:
 | `--limit <count>` | Limit how many message previews are scanned. |
 | `--require-match` | Exit non-zero when no matching message is found. |
 
-Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`.
+Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
 
 ### OTP and Link Extraction
 

@@ -18,7 +18,7 @@ Every command must accept the existing global flags consistently:
 | Flag | Convention |
 |------|------------|
 | `--json` | Equivalent to `--format json`; emits the JSON envelope. |
-| `--format <human\|json>` | Selects human output or JSON output. Future table output must be opt-in and documented before use. |
+| `--format <human\|json\|table>` | Selects human output, table output, or JSON output. |
 | `--timeout <seconds>` | Positive integer seconds passed to command implementations. |
 | `--config <path>` | Overrides `PROTONMAIL_CONFIG_FILE`. |
 | `--session <path>` | Overrides `PROTONMAIL_SESSION_FILE` and config-file session values. |
@@ -98,7 +98,7 @@ Human output should be useful in a terminal, but JSON is the automation contract
 - Prefer tabular output for lists only when columns are predictable and redacted.
 - Use `No messages.` or another short sentence for empty human results.
 - Do not print message bodies, OTP codes, links, or private mailbox metadata unless the command's purpose requires it and the user explicitly requested that output.
-- If table output is added as a separate format, cover it with tests and document column names.
+- `--format table` reuses the existing human renderers for `pm ls`, `pm mail search`, `pm mail latest`, and `pm read`.
 
 ## No-Match Semantics
 
