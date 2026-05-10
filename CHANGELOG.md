@@ -1,3 +1,11 @@
+# [1.10.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.9.0...v1.10.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** parse mail metadata filters ([46fdf66](https://github.com/hacker-h/proton-mail-cli/commit/46fdf66bc63e2dfa045861f84f74f88330322039))
+* **mail:** add metadata filter helper ([3ddaaea](https://github.com/hacker-h/proton-mail-cli/commit/3ddaaeac16faff2b51f99296d5427597768913c9))
+
 # [1.9.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.8.0...v1.9.0) (2026-05-10)
 
 
