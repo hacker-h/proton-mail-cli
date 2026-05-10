@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.3.0...v1.4.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** add browser-backed otp command ([baa0ebd](https://github.com/hacker-h/proton-mail-cli/commit/baa0ebdcd3d39592fe9ba09e5df67e835914d23d))
+
 # [1.3.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.2.1...v1.3.0) (2026-05-10)
 
 
