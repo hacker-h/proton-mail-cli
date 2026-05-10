@@ -9,7 +9,7 @@ The browser client is the canonical dependency surface when other local projects
 
 ## CLI Usage
 
-This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. Mail list/read commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login. `pm otp` is browser-backed in the installed binary and uses saved-session reuse plus the extraction helpers documented below.
+This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls` and `pm mail latest` are browser-backed in the installed binary and use saved-session reuse. `pm read` remains an injected-client contract until the CLI has a stable message-reference contract for plaintext reads.
 
 Local workspace usage:
 
@@ -25,6 +25,7 @@ Installed package usage:
 pm --help
 pm version
 pm ls
+pm ls --match github --limit 5 --json
 pm mail latest
 pm read <messageId>
 pm otp --match openai --json
@@ -42,6 +43,27 @@ Global flags:
 | `--session <path>` | Uses a Proton session state path. Overrides env and config files. |
 | `--quiet` | Suppresses human success output. Errors still go to stderr. |
 | `--verbose` | Passes verbose mode to injected clients. |
+
+### Mail Listing and Latest Message
+
+`pm ls` / `pm mail list` scan Proton Mail through the browser backend. `pm mail latest` opens the latest matching message and returns safe metadata in JSON while omitting body text, browser handles, and debug events.
+
+```bash
+pm ls --limit 10
+pm ls --match '/github/i' --folder all-mail --json
+pm mail latest --match openai --require-match --json
+```
+
+Command-specific mail flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--match <text\|/re/i>` | Select messages whose preview contains text or matches a regex literal. |
+| `--folder <name>` | Select browser scan folder, for example `inbox` or `all-mail`. |
+| `--limit <count>` | Limit how many message previews are scanned. |
+| `--require-match` | Exit non-zero when no matching message is found. |
+
+Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List output includes preview snippets because listing mail is the command purpose; it never includes full message bodies.
 
 ### OTP and Link Extraction
 
