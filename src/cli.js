@@ -15,7 +15,7 @@ import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
- * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, requireMatch?: boolean }} OtpCommandOptions
+ * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
@@ -321,6 +321,16 @@ function parseOtpArgs(args, global) {
       continue;
     }
 
+    if (option.name === "--poll-interval") {
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      const pollInterval = Number(value);
+      if (!Number.isInteger(pollInterval) || pollInterval <= 0) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_POLL_INTERVAL", "--poll-interval must be a positive integer", { value });
+      }
+      options.pollInterval = pollInterval;
+      continue;
+    }
+
     throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
   }
 
@@ -351,6 +361,7 @@ function isOtpOptionName(name) {
     "--link-pattern",
     "--folder",
     "--limit",
+    "--poll-interval",
   ].includes(name);
 }
 
@@ -413,6 +424,7 @@ function normalizeOtpResult(result, requireMatch) {
 /** @param {Record<string, unknown>} result */
 function classifyOtpFailure(result) {
   const message = String(result.error || "");
+  if (result.timeout || /timed out waiting/iu.test(message)) return "timeout";
   if (/No matching Proton Mail message found/iu.test(message)) return "no_match";
   if (/Matching email found, but no/iu.test(message)) return "matched_without_token";
   if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
@@ -426,6 +438,7 @@ function otpFailureCode(status) {
   if (status === "matched_without_token") return "TOKEN_NOT_FOUND";
   if (status === "session_expired") return "SESSION_EXPIRED";
   if (status === "auth_error") return "AUTH_REQUIRED";
+  if (status === "timeout") return "TIMEOUT";
   return "OTP_EXTRACTION_FAILED";
 }
 
@@ -435,6 +448,7 @@ function otpFailureMessage(status) {
   if (status === "matched_without_token") return "Matching Proton Mail message found, but no OTP code or link was present";
   if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
   if (status === "auth_error") return "Proton Mail credentials or session are required";
+  if (status === "timeout") return "Timed out waiting for matching Proton Mail OTP or link";
   return "OTP extraction failed";
 }
 
@@ -462,7 +476,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
