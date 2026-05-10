@@ -77,6 +77,13 @@ describe("pm CLI runner", () => {
     assert.equal(parsed.global.config, "config.json");
     assert.equal(parsed.global.session, "session.json");
     assert.equal(parsed.global.verbose, true);
+
+    const tableParsed = parseArgv(["ls", "--format", "table"]);
+    assert.equal(tableParsed.global.format, "table");
+    assert.throws(() => parseArgv(["ls", "--format", "csv"]), {
+      code: "INVALID_FORMAT",
+      exitCode: CLI_EXIT.USAGE,
+    });
   });
 
   it("dispatches pm ls with injected clients", async () => {
@@ -90,7 +97,7 @@ describe("pm CLI runner", () => {
     let exitCode;
     await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
       exitCode = await runPmCli({
-        argv: ["ls", "--timeout", "20", "--session", "session.json"],
+        argv: ["ls", "--timeout", "20", "--session", "session.json", "--format", "table"],
         clients: { mail: { list } },
         ...io,
       });
@@ -105,7 +112,7 @@ describe("pm CLI runner", () => {
       session: path.resolve("session.json"),
       quiet: false,
       verbose: false,
-      format: "human",
+      format: "table",
     });
   });
 

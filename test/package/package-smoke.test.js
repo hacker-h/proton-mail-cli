@@ -36,6 +36,7 @@ describe("installed pm package smoke", () => {
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /Usage:/u);
     assert.match(help.stdout, /pm ls/u);
+    assert.match(help.stdout, /--format <human\|json\|table>/u);
     assert.equal(help.stderr, "");
 
     const version = run(pm, ["--version"], { cwd: appDir, env });
