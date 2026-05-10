@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.2.1...v1.3.0) (2026-05-10)
+
+
+### Features
+
+* **browser:** add configurable OTP extraction ([f3aef42](https://github.com/hacker-h/proton-mail-cli/commit/f3aef42a35f47d0b60f3cc7b269ba2d3b61da638))
+
 ## [1.2.1](https://github.com/hacker-h/proton-mail-cli/compare/v1.2.0...v1.2.1) (2026-05-09)
 
 
