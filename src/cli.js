@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.js";
+import { buildMailMetadataFilter } from "./mail-runner.js";
 
 /**
  * @typedef {{ write(chunk: string): unknown }} WritableLike
@@ -15,7 +16,7 @@ import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
- * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean }} MailCommandOptions
+ * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
  * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
@@ -306,6 +307,58 @@ function parseMailArgs(args, global, commandLabel) {
       continue;
     }
 
+    if (option.name === "--label" || option.name === "--label-id") {
+      options.labelId = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--subject") {
+      options.subject = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--from" || option.name === "--sender") {
+      options.from = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--to") {
+      options.to = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--unread") {
+      if (option.value !== undefined) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--unread does not accept a value", { flag: option.name });
+      }
+      if (options.read) {
+        throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_FLAGS", "--read and --unread cannot be used together");
+      }
+      options.unread = true;
+      continue;
+    }
+
+    if (option.name === "--read") {
+      if (option.value !== undefined) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--read does not accept a value", { flag: option.name });
+      }
+      if (options.unread) {
+        throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_FLAGS", "--read and --unread cannot be used together");
+      }
+      options.read = true;
+      continue;
+    }
+
+    if (option.name === "--after") {
+      options.after = parseMailTimestamp(option.value ?? readCommandOptionValue(args, ++index, option.name), option.name);
+      continue;
+    }
+
+    if (option.name === "--before") {
+      options.before = parseMailTimestamp(option.value ?? readCommandOptionValue(args, ++index, option.name), option.name);
+      continue;
+    }
+
     if (option.name === "--limit") {
       const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
       const limit = Number(value);
@@ -319,7 +372,23 @@ function parseMailArgs(args, global, commandLabel) {
     throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
   }
 
+  const metadataFilter = buildMailMetadataFilter(options);
+  if (Object.keys(metadataFilter).length > 0) options.metadataFilter = metadataFilter;
   return { options, requireMatch };
+}
+
+/**
+ * @param {string} value
+ * @param {string} flag
+ */
+function parseMailTimestamp(value, flag) {
+  const numeric = Number(value);
+  if (Number.isInteger(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new CliError(CLI_EXIT.USAGE, "INVALID_DATE", `${flag} must be a Unix timestamp or parseable date`, { flag, value });
+  }
+  return Math.floor(parsed / 1000);
 }
 
 /**
@@ -452,7 +521,7 @@ function sanitizeMailMessage(message) {
   const output = {};
   if (object.ref !== undefined) output.ref = object.ref;
   if (object.ref === undefined && object.index !== undefined) output.ref = `browser:index:${object.index}`;
-  for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "time", "receivedAt", "preview"]) {
+  for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "Sender", "time", "Time", "receivedAt", "Unread", "LabelIDs", "AddressID", "preview"]) {
     if (object[key] !== undefined) output[key] = object[key];
   }
   return output;
@@ -594,6 +663,16 @@ function isOtpOptionName(name) {
     "--otp-pattern",
     "--link-pattern",
     "--folder",
+    "--label",
+    "--label-id",
+    "--subject",
+    "--from",
+    "--sender",
+    "--to",
+    "--read",
+    "--unread",
+    "--after",
+    "--before",
     "--limit",
     "--poll-interval",
   ].includes(name);
@@ -736,7 +815,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --label <id>           Add a REST metadata LabelID filter for injected clients\n  --label-id <id>        Alias for --label\n  --subject <text>       Add a REST metadata subject filter for injected clients\n  --from <text>          Add a REST metadata sender filter for injected clients\n  --sender <text>        Alias for --from\n  --to <text>            Add a REST metadata recipient filter for injected clients\n  --read | --unread      Add a REST metadata read-state filter for injected clients\n  --after <date|ts>      Add a REST metadata lower time bound\n  --before <date|ts>     Add a REST metadata upper time bound\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {

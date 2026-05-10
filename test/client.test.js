@@ -123,6 +123,45 @@ describe("ProtonMailClient", () => {
     assert.equal(fetchOptions.method, "POST");
   });
 
+  it("getMessageMetadata forwards REST metadata filters", async () => {
+    const fetchImpl = mockFetch(200, {
+      Code: 1000,
+      Messages: [{ ID: "m1", Subject: "Invoice", Sender: { Address: "billing@example.test" }, Time: 1704067200, Unread: 1 }],
+      Total: 1,
+    });
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const result = await client.getMessageMetadata({
+      Subject: "Invoice",
+      From: "billing@example.test",
+      To: "ops@example.test",
+      LabelID: Labels.INBOX,
+      Unread: 1,
+      Begin: 1704067200,
+      End: 1704153600,
+      Sort: "Time",
+      Desc: 1,
+    }, 1, 25);
+
+    assert.equal(result.messages.length, 1);
+    assert.equal(result.total, 1);
+    const [, fetchOptions] = fetchImpl.mock.calls[0].arguments;
+    const body = JSON.parse(fetchOptions.body);
+    assert.deepEqual(body, {
+      Subject: "Invoice",
+      From: "billing@example.test",
+      To: "ops@example.test",
+      LabelID: Labels.INBOX,
+      Unread: 1,
+      Begin: 1704067200,
+      End: 1704153600,
+      Sort: "ID",
+      Desc: 1,
+      Page: 1,
+      PageSize: 25,
+    });
+  });
+
   it("markMessagesRead calls PUT /mail/v4/messages/read", async () => {
     const fetchImpl = mockFetch(200, { Code: 1000 });
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
