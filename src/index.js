@@ -1,5 +1,13 @@
 export { ProtonMailClient } from "./client.js";
-export { ProtonMailBrowserClient, extractFirstOtpCode, matchOpenAiEmail, defaultSessionFile } from "./browser-client.js";
+export {
+  ProtonMailBrowserClient,
+  OTP_PROVIDER_PRESETS,
+  extractFirstLink,
+  extractFirstOtpCode,
+  extractOtpCode,
+  matchOpenAiEmail,
+  defaultSessionFile,
+} from "./browser-client.js";
 export { ProtonHttp } from "./http.js";
 export { runPm, runPmCli, parseArgv, dispatchCommand, CliError, CLI_EXIT } from "./cli.js";
 export { defaultConfigFile, defaultSessionFilePath, resolveCliConfig, resolveSecret, doctorConfig, doctorSession, inspectSessionFile, redact } from "./config.js";
