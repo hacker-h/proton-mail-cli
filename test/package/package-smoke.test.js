@@ -68,6 +68,11 @@ describe("installed pm package smoke", () => {
     assert.equal(mailUsage.stdout, "");
     assert.equal(JSON.parse(mailUsage.stderr).error.code, "INVALID_LIMIT");
 
+    const searchUsage = run(pm, ["mail", "search", "--json"], { cwd: appDir, env });
+    assert.equal(searchUsage.status, 1, searchUsage.stderr);
+    assert.equal(searchUsage.stdout, "");
+    assert.equal(JSON.parse(searchUsage.stderr).error.code, "MISSING_MATCH");
+
     const otpUsage = run(pm, ["otp", "--limit", "not-a-number", "--json"], { cwd: appDir, env });
     assert.equal(otpUsage.status, 1, otpUsage.stderr);
     assert.equal(otpUsage.stdout, "");
