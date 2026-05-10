@@ -27,6 +27,8 @@ Every command must accept the existing global flags consistently:
 
 Command-specific flags should use long names first. Add short flags only when they are obvious and unlikely to conflict.
 
+Mail metadata filter flags such as `--label`, `--subject`, `--from`, `--to`, `--read`, `--unread`, `--after`, and `--before` are additive filters for injected REST metadata clients. Browser-backed installed commands may ignore them until a REST session-store-backed CLI path exists; they must still be parsed, validated, and surfaced in `metadataFilter` consistently.
+
 ## JSON Envelope
 
 JSON mode always writes exactly one JSON object followed by a newline. Success goes to stdout:

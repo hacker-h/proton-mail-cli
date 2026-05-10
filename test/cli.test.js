@@ -144,6 +144,50 @@ describe("pm CLI runner", () => {
     assert.equal(options.requireMatch, true);
   });
 
+  it("passes REST metadata filters to injected mail clients", async () => {
+    const io = createIo();
+    const list = mock.fn(async () => ({ success: true, source: "rest", messages: [] }));
+
+    const exitCode = await runPmCli({
+      argv: [
+        "ls",
+        "--subject",
+        "Invoice",
+        "--from",
+        "billing@example.test",
+        "--to",
+        "ops@example.test",
+        "--label",
+        "0",
+        "--unread",
+        "--after",
+        "2024-01-01T00:00:00Z",
+        "--before",
+        "1704153600",
+        "--json",
+      ],
+      clients: { mail: { list } },
+      ...io,
+    });
+
+    assert.equal(exitCode, CLI_EXIT.OK);
+    const options = list.mock.calls[0].arguments[0];
+    assert.equal(options.subject, "Invoice");
+    assert.equal(options.from, "billing@example.test");
+    assert.equal(options.to, "ops@example.test");
+    assert.equal(options.labelId, "0");
+    assert.equal(options.unread, true);
+    assert.deepEqual(options.metadataFilter, {
+      Subject: "Invoice",
+      From: "billing@example.test",
+      To: "ops@example.test",
+      LabelID: "0",
+      Unread: 1,
+      Begin: 1704067200,
+      End: 1704153600,
+    });
+  });
+
   it("returns empty mail list results unless --require-match is set", async () => {
     const relaxed = createIo();
     const required = createIo();
@@ -391,8 +435,40 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(required.stderrText()).error.code, "NO_MATCH");
   });
 
+  it("keeps safe REST metadata fields in mail list output", async () => {
+    const io = createIo();
+    const list = mock.fn(async () => ({
+      success: true,
+      source: "rest",
+      messages: [{
+        ID: "m1",
+        Subject: "Invoice",
+        Sender: { Name: "Billing", Address: "billing@example.test" },
+        Time: 1704067200,
+        Unread: 1,
+        LabelIDs: ["0"],
+        Body: "Encrypted body should not be listed",
+      }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["ls", "--json"], clients: { mail: { list } }, ...io }), CLI_EXIT.OK);
+    const envelopeText = io.stdoutText();
+    const envelope = JSON.parse(envelopeText);
+    assert.deepEqual(envelope.data.messages, [{
+      ID: "m1",
+      Subject: "Invoice",
+      Sender: { Name: "Billing", Address: "billing@example.test" },
+      Time: 1704067200,
+      Unread: 1,
+      LabelIDs: ["0"],
+    }]);
+    assert.equal(envelopeText.includes("Encrypted body"), false);
+  });
+
   it("rejects invalid mail command flags before dispatch", async () => {
     const invalidLimit = createIo();
+    const conflictingState = createIo();
+    const invalidDate = createIo();
     const unknown = createIo();
     const list = mock.fn(async () => ({ messages: [] }));
 
@@ -401,6 +477,12 @@ describe("pm CLI runner", () => {
 
     assert.equal(await runPmCli({ argv: ["mail", "latest", "--unknown", "--json"], clients: { mail: { latest: list } }, ...unknown }), CLI_EXIT.USAGE);
     assert.equal(JSON.parse(unknown.stderrText()).error.code, "UNKNOWN_FLAG");
+
+    assert.equal(await runPmCli({ argv: ["ls", "--read", "--unread", "--json"], clients: { mail: { list } }, ...conflictingState }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(conflictingState.stderrText()).error.code, "CONFLICTING_FLAGS");
+
+    assert.equal(await runPmCli({ argv: ["ls", "--after", "soon", "--json"], clients: { mail: { list } }, ...invalidDate }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(invalidDate.stderrText()).error.code, "INVALID_DATE");
     assert.equal(list.mock.callCount(), 0);
   });
 

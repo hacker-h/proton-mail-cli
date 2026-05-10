@@ -10,6 +10,7 @@ export {
 } from "./browser-client.js";
 export { ProtonHttp } from "./http.js";
 export { runPm, runPmCli, parseArgv, dispatchCommand, CliError, CLI_EXIT } from "./cli.js";
+export { buildMailMetadataFilter, filterMailMessages, parseBrowserMessageRef } from "./mail-runner.js";
 export { defaultConfigFile, defaultSessionFilePath, resolveCliConfig, resolveSecret, doctorConfig, doctorSession, inspectSessionFile, redact } from "./config.js";
 export { ApiError, RateLimitError, SessionExpiredError } from "./errors.js";
 export {

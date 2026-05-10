@@ -64,10 +64,16 @@ Command-specific mail flags:
 |------|---------|
 | `--match <text\|/re/i>` | Select messages whose preview contains text or matches a regex literal. |
 | `--folder <name>` | Select browser scan folder, for example `inbox` or `all-mail`. |
+| `--label <id>` / `--label-id <id>` | Adds a Proton REST metadata `LabelID` filter for injected REST clients. |
+| `--subject <text>` | Adds a Proton REST metadata subject filter for injected REST clients. |
+| `--from <text>` / `--sender <text>` | Adds a Proton REST metadata sender filter for injected REST clients. |
+| `--to <text>` | Adds a Proton REST metadata recipient filter for injected REST clients. |
+| `--read` / `--unread` | Adds a Proton REST metadata read-state filter for injected REST clients. |
+| `--after <date\|timestamp>` / `--before <date\|timestamp>` | Adds Proton REST metadata time bounds for injected REST clients. |
 | `--limit <count>` | Limit how many message previews are scanned. |
 | `--require-match` | Exit non-zero when no matching message is found. |
 
-Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
+The installed `pm` binary remains browser-backed for mail commands; REST metadata filters are surfaced in injected client options as `metadataFilter` for callers that wire `ProtonMailClient.getMessageMetadata()`. Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
 
 ### OTP and Link Extraction
 
@@ -245,6 +251,7 @@ This repo handles secret-bearing browser session state (Playwright storage state
 
 ```js
 import { ProtonMailClient, Labels } from "proton-mail-cli";
+import { buildMailMetadataFilter } from "proton-mail-cli";
 
 const client = new ProtonMailClient({
   sessionStore: mySessionStore,
@@ -257,6 +264,11 @@ const client = new ProtonMailClient({
 });
 
 const { messages, total } = await client.getMessageMetadata({ LabelID: Labels.INBOX });
+const unreadInvoices = await client.getMessageMetadata(buildMailMetadataFilter({
+  labelId: Labels.INBOX,
+  subject: "Invoice",
+  unread: true,
+}));
 const message = await client.getMessage("MESSAGE_ID");
 await client.markMessagesRead(["MESSAGE_ID"]);
 const attachmentBytes = await client.getAttachment("ATTACHMENT_ID");
