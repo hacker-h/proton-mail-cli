@@ -27,6 +27,7 @@ describe("CLI config resolution", () => {
       global: { config: configPath, session: "/flag/session.json", timeout: 9 },
       env: {
         PROTONMAIL_SESSION_FILE: "/env/session.json",
+        PROTONMAIL_REST_SESSION_FILE: "/env/rest-session.json",
         PROTONMAIL_TIMEOUT_SECONDS: "8",
         PROTONMAIL_USERNAME: "user@example.com",
         PROTONMAIL_PASSWORD_FILE: "/tmp/password",
@@ -40,16 +41,31 @@ describe("CLI config resolution", () => {
     });
 
     assert.equal(resolved.values.sessionFile, "/flag/session.json");
+    assert.equal(resolved.values.restSessionFile, "/env/rest-session.json");
     assert.equal(resolved.values.timeout, 9);
     assert.equal(resolved.values.username, "user@example.com");
     assert.equal(resolved.values.password, "s3cr3t");
     assert.deepEqual(resolved.sources, {
       config: "flag",
       sessionFile: "flag",
+      restSessionFile: "env",
       timeout: "flag",
       username: "env",
       password: "file",
     });
+  });
+
+  it("reads REST session store path from config files", () => {
+    const configPath = "/tmp/pm-config.json";
+    const resolved = resolveCliConfig({
+      global: { config: configPath },
+      env: {},
+      exists: (filePath) => filePath === configPath,
+      readFile: () => JSON.stringify({ restSessionFile: "/config/rest-session.json" }),
+    });
+
+    assert.equal(resolved.values.restSessionFile, "/config/rest-session.json");
+    assert.equal(resolved.sources.restSessionFile, "config");
   });
 
   it("supports command-backed secrets after direct and file forms", () => {
