@@ -238,8 +238,9 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
       throw new CliError(CLI_EXIT.USAGE, "MISSING_MESSAGE_ID", "pm read requires <messageId>");
     }
     expectArgs(args, 1, "pm read <messageId>");
-    const data = await callInjected(clients.mail?.read, [messageId, clientOptions(global)], "pm read <messageId>");
-    return { command, data, human: renderObject(data) };
+    const result = await callInjected(clients.mail?.read, [messageId, clientOptions(global)], "pm read <messageId>");
+    const data = normalizeMailReadResult(result);
+    return { command, data, human: renderRead(data) };
   }
 
   if (command === "otp") {
@@ -373,6 +374,27 @@ function normalizeMailLatestResult(result, requireMatch) {
   };
 }
 
+/** @param {unknown} result */
+function normalizeMailReadResult(result) {
+  const object = toRecord(result);
+  if (object.success === false) {
+    const status = classifyMailFailure(object);
+    throw new CliError(CLI_EXIT.USAGE, mailFailureCode(status), mailFailureMessage(status), {
+      status,
+      error: String(redact(object.error || mailFailureMessage(status))),
+    });
+  }
+
+  const message = sanitizeMailReadMessage(object.message || result);
+  return {
+    ...sanitizeMailOutput(object),
+    success: object.success ?? true,
+    status: Object.keys(message).length > 0 ? "matched" : "no_match",
+    source: object.source || "unknown",
+    message,
+  };
+}
+
 /**
  * @param {Record<string, unknown>} object
  * @param {boolean} requireMatch
@@ -394,6 +416,7 @@ function normalizeMailFailure(object, requireMatch) {
 function classifyMailFailure(result) {
   const message = String(result.error || "");
   if (/No matching Proton Mail message found|No matching Proton Mail messages found/iu.test(message)) return "no_match";
+  if (/browser:index:N refs/iu.test(message)) return "invalid_message_ref";
   if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
   if (/credential|auth|login/iu.test(message)) return "auth_error";
   return "upstream_failure";
@@ -402,6 +425,7 @@ function classifyMailFailure(result) {
 /** @param {string} status */
 function mailFailureCode(status) {
   if (status === "no_match") return "NO_MATCH";
+  if (status === "invalid_message_ref") return "INVALID_MESSAGE_REF";
   if (status === "session_expired") return "SESSION_EXPIRED";
   if (status === "auth_error") return "AUTH_REQUIRED";
   return "MAIL_COMMAND_FAILED";
@@ -410,6 +434,7 @@ function mailFailureCode(status) {
 /** @param {string} status */
 function mailFailureMessage(status) {
   if (status === "no_match") return "No matching Proton Mail message found";
+  if (status === "invalid_message_ref") return "pm read requires a browser:index:N ref from pm ls or pm mail search";
   if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
   if (status === "auth_error") return "Proton Mail credentials or session are required";
   return "Proton Mail command failed";
@@ -430,6 +455,14 @@ function sanitizeMailMessage(message) {
   for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "time", "receivedAt", "preview"]) {
     if (object[key] !== undefined) output[key] = object[key];
   }
+  return output;
+}
+
+/** @param {unknown} message */
+function sanitizeMailReadMessage(message) {
+  const output = sanitizeMailMessage(message);
+  const object = toRecord(message);
+  if (typeof object.bodyText === "string") output.bodyText = object.bodyText;
   return output;
 }
 
@@ -924,6 +957,13 @@ function renderObject(data) {
   if (object.Subject) return `${object.Subject}\n`;
   if (object.subject) return `${object.subject}\n`;
   return `${JSON.stringify(data)}\n`;
+}
+
+/** @param {unknown} data */
+function renderRead(data) {
+  const message = toRecord(toRecord(data).message);
+  if (typeof message.bodyText === "string" && message.bodyText.length > 0) return `${message.bodyText}\n`;
+  return renderObject(data);
 }
 
 /** @param {unknown} data */

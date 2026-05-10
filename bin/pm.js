@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { runPmCli } from "../src/cli.js";
-import { filterMailMessages } from "../src/mail-runner.js";
+import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { extractOtpWithPolling } from "../src/otp-runner.js";
 
 const exitCode = await runPmCli({
@@ -11,6 +11,7 @@ const exitCode = await runPmCli({
       list: listMailFromBrowser,
       latest: latestMailFromBrowser,
       search: searchMailFromBrowser,
+      read: readMailFromBrowser,
     },
     otp: {
       get: extractOtpFromBrowser,
@@ -42,6 +43,23 @@ async function searchMailFromBrowser(options) {
     source: "browser",
     messages,
   };
+}
+
+async function readMailFromBrowser(messageRef, options) {
+  const index = parseBrowserMessageRef(messageRef);
+  if (index === null) {
+    return {
+      success: false,
+      error: "pm read currently supports browser:index:N refs emitted by pm ls and pm mail search",
+    };
+  }
+
+  const client = browserClient(options);
+  const result = await client.getLatestMessage({
+    ...browserOptions(options),
+    matchText: (message) => message.index === index,
+  });
+  return { ...result, source: "browser" };
 }
 
 async function extractOtpFromBrowser(options) {
