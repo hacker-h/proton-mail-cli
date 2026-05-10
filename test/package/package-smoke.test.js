@@ -47,10 +47,10 @@ describe("installed pm package smoke", () => {
     const importCheck = run(process.execPath, [
       "--input-type=module",
       "--eval",
-      "import { ProtonMailClient, ProtonMailBrowserClient } from 'proton-mail-cli'; console.log(`${typeof ProtonMailClient}:${typeof ProtonMailBrowserClient}`);",
+      "import { ProtonMailClient, ProtonMailBrowserClient, buildMailMetadataFilter } from 'proton-mail-cli'; console.log(`${typeof ProtonMailClient}:${typeof ProtonMailBrowserClient}:${typeof buildMailMetadataFilter}`);",
     ], { cwd: appDir, env });
     assert.equal(importCheck.status, 0, importCheck.stderr);
-    assert.equal(importCheck.stdout, "function:function\n");
+    assert.equal(importCheck.stdout, "function:function:function\n");
     assert.equal(importCheck.stderr, "");
 
     const failure = run(pm, ["read", "msg1", "--json"], { cwd: appDir, env });
@@ -68,6 +68,11 @@ describe("installed pm package smoke", () => {
     assert.equal(mailUsage.status, 1, mailUsage.stderr);
     assert.equal(mailUsage.stdout, "");
     assert.equal(JSON.parse(mailUsage.stderr).error.code, "INVALID_LIMIT");
+
+    const mailDateUsage = run(pm, ["ls", "--after", "not-a-date", "--json"], { cwd: appDir, env });
+    assert.equal(mailDateUsage.status, 1, mailDateUsage.stderr);
+    assert.equal(mailDateUsage.stdout, "");
+    assert.equal(JSON.parse(mailDateUsage.stderr).error.code, "INVALID_DATE");
 
     const searchUsage = run(pm, ["mail", "search", "--json"], { cwd: appDir, env });
     assert.equal(searchUsage.status, 1, searchUsage.stderr);
