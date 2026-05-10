@@ -111,6 +111,8 @@ Search-like commands must distinguish these states in JSON:
 
 Default no-match behavior should be a successful empty result when absence is expected. `--require-match` turns no-match, matched-without-token, and timeout into failures suitable for CI.
 
+`pm ls` / `pm mail list` and `pm mail latest` follow the same search-like contract. Browser-backed list output may include preview snippets but must not include full message bodies, browser handles, or debug events. Plaintext read output requires an explicit read command and a stable message-reference contract.
+
 `pm otp` follows this contract for OTP and link extraction. In human mode it prints only the extracted code or link; in JSON mode it includes stable booleans such as `codeFound` and `linkFound` plus `status`. JSON output must omit message bodies, previews, browser handles, and debug events. The command may reveal the requested OTP/link by design, so tests and logs must never print message bodies, session state, credentials, or unrelated mailbox metadata.
 
 `pm otp` command-specific flags:

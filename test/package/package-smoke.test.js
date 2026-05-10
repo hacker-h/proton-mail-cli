@@ -52,16 +52,21 @@ describe("installed pm package smoke", () => {
     assert.equal(importCheck.stdout, "function:function\n");
     assert.equal(importCheck.stderr, "");
 
-    const failure = run(pm, ["ls", "--json"], { cwd: appDir, env });
+    const failure = run(pm, ["read", "msg1", "--json"], { cwd: appDir, env });
     assert.equal(failure.status, 2, failure.stderr);
     assert.equal(failure.stdout, "");
 
     const envelope = JSON.parse(failure.stderr);
     assert.equal(envelope.ok, false);
-    assert.equal(envelope.command, "mail:list");
+    assert.equal(envelope.command, "mail:read");
     assert.equal(envelope.data, null);
     assert.equal(envelope.error.code, "FEATURE_NOT_IMPLEMENTED");
     assert.equal(envelope.meta.envelope, "pm.v1");
+
+    const mailUsage = run(pm, ["ls", "--limit", "not-a-number", "--json"], { cwd: appDir, env });
+    assert.equal(mailUsage.status, 1, mailUsage.stderr);
+    assert.equal(mailUsage.stdout, "");
+    assert.equal(JSON.parse(mailUsage.stderr).error.code, "INVALID_LIMIT");
 
     const otpUsage = run(pm, ["otp", "--limit", "not-a-number", "--json"], { cwd: appDir, env });
     assert.equal(otpUsage.status, 1, otpUsage.stderr);

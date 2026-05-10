@@ -107,6 +107,50 @@ describe("pm CLI runner", () => {
     });
   });
 
+  it("passes mail list filters to injected clients", async () => {
+    const io = createIo();
+    const list = mock.fn(async () => ({
+      success: true,
+      source: "browser",
+      messages: [{ index: 0, preview: "GitHub verification" }],
+    }));
+
+    const exitCode = await runPmCli({
+      argv: ["ls", "--match", "/github/i", "--folder", "all-mail", "--limit", "3", "--require-match", "--json"],
+      clients: { mail: { list } },
+      ...io,
+    });
+
+    assert.equal(exitCode, CLI_EXIT.OK);
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.data.status, "matched");
+    assert.equal(envelope.data.source, "browser");
+    assert.equal(envelope.data.count, 1);
+    assert.deepEqual(envelope.data.messages, [{ ref: "browser:index:0", index: 0, preview: "GitHub verification" }]);
+    const options = list.mock.calls[0].arguments[0];
+    assert.equal(options.matchText instanceof RegExp, true);
+    assert.equal(options.matchText.test("GitHub"), true);
+    assert.equal(options.folder, "all-mail");
+    assert.equal(options.limit, 3);
+    assert.equal(options.requireMatch, true);
+  });
+
+  it("returns empty mail list results unless --require-match is set", async () => {
+    const relaxed = createIo();
+    const required = createIo();
+    const list = mock.fn(async () => ({ success: true, source: "browser", messages: [] }));
+
+    assert.equal(await runPmCli({ argv: ["ls", "--json"], clients: { mail: { list } }, ...relaxed }), CLI_EXIT.OK);
+    const relaxedEnvelope = JSON.parse(relaxed.stdoutText());
+    assert.equal(relaxedEnvelope.data.status, "no_match");
+    assert.equal(relaxedEnvelope.data.count, 0);
+    assert.deepEqual(relaxedEnvelope.data.messages, []);
+
+    assert.equal(await runPmCli({ argv: ["ls", "--require-match", "--json"], clients: { mail: { list } }, ...required }), CLI_EXIT.USAGE);
+    const requiredEnvelope = JSON.parse(required.stderrText());
+    assert.equal(requiredEnvelope.error.code, "NO_MATCH");
+  });
+
   it("passes env session and timeout values to normal mail dispatch", async () => {
     const io = createIo();
     const list = mock.fn(async (options) => ({ messages: [], options }));
@@ -180,6 +224,64 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(readIo.stdoutText()).data.id, "msg42");
     assert.equal(JSON.parse(otpIo.stdoutText()).data.code, "123456");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
+  });
+
+  it("normalizes mail latest results and omits message bodies", async () => {
+    const io = createIo();
+    const latest = mock.fn(async () => ({
+      success: true,
+      source: "browser",
+      message: {
+        index: 0,
+        subject: "Latest subject",
+        preview: "Preview line",
+        bodyText: "Private body",
+      },
+      debugEvents: [{ message: "selector detail" }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "latest", "--match", "Preview", "--json"], clients: { mail: { latest } }, ...io }), CLI_EXIT.OK);
+    const envelopeText = io.stdoutText();
+    const envelope = JSON.parse(envelopeText);
+    assert.equal(envelope.data.status, "matched");
+    assert.deepEqual(envelope.data.message, {
+      ref: "browser:index:0",
+      index: 0,
+      subject: "Latest subject",
+      preview: "Preview line",
+    });
+    assert.equal(envelopeText.includes("Private body"), false);
+    assert.equal(envelopeText.includes("debugEvents"), false);
+    assert.equal(latest.mock.calls[0].arguments[0].matchText, "Preview");
+  });
+
+  it("classifies mail latest no-match and redacts relaxed failures", async () => {
+    const relaxed = createIo();
+    const required = createIo();
+    const latest = mock.fn(async () => ({ success: false, error: "No matching Proton Mail message found user@example.com password=abc" }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "latest", "--json"], clients: { mail: { latest } }, ...relaxed }), CLI_EXIT.OK);
+    const relaxedText = relaxed.stdoutText();
+    const relaxedEnvelope = JSON.parse(relaxedText);
+    assert.equal(relaxedEnvelope.data.status, "no_match");
+    assert.equal(relaxedText.includes("user@example.com"), false);
+    assert.equal(relaxedText.includes("abc"), false);
+
+    assert.equal(await runPmCli({ argv: ["mail", "latest", "--require-match", "--json"], clients: { mail: { latest } }, ...required }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(required.stderrText()).error.code, "NO_MATCH");
+  });
+
+  it("rejects invalid mail command flags before dispatch", async () => {
+    const invalidLimit = createIo();
+    const unknown = createIo();
+    const list = mock.fn(async () => ({ messages: [] }));
+
+    assert.equal(await runPmCli({ argv: ["ls", "--limit", "many", "--json"], clients: { mail: { list } }, ...invalidLimit }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(invalidLimit.stderrText()).error.code, "INVALID_LIMIT");
+
+    assert.equal(await runPmCli({ argv: ["mail", "latest", "--unknown", "--json"], clients: { mail: { latest: list } }, ...unknown }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(unknown.stderrText()).error.code, "UNKNOWN_FLAG");
+    assert.equal(list.mock.callCount(), 0);
   });
 
   it("passes OTP extraction flags to injected clients", async () => {

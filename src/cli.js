@@ -15,6 +15,7 @@ import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean }} MailCommandOptions
  * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
@@ -208,14 +209,16 @@ export function parseArgv(argv) {
  */
 export async function dispatchCommand({ command, args, global, clients = {} }) {
   if (command === "mail:list") {
-    expectArgs(args, 0, "pm ls");
-    const data = await callInjected(clients.mail?.list, [clientOptions(global)], "pm ls");
+    const { options, requireMatch } = parseMailArgs(args, global, "pm ls");
+    const result = await callInjected(clients.mail?.list, [options], "pm ls");
+    const data = normalizeMailListResult(result, requireMatch);
     return { command, data, human: renderList(data) };
   }
 
   if (command === "mail:latest") {
-    expectArgs(args, 0, "pm mail latest");
-    const data = await callInjected(clients.mail?.latest, [clientOptions(global)], "pm mail latest");
+    const { options, requireMatch } = parseMailArgs(args, global, "pm mail latest");
+    const result = await callInjected(clients.mail?.latest, [options], "pm mail latest");
+    const data = normalizeMailLatestResult(result, requireMatch);
     return { command, data, human: renderObject(data) };
   }
 
@@ -250,6 +253,194 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     command,
     args,
   });
+}
+
+/**
+ * @param {string[]} args
+ * @param {GlobalOptions} global
+ * @param {string} commandLabel
+ * @returns {{ options: MailCommandOptions, requireMatch: boolean }}
+ */
+function parseMailArgs(args, global, commandLabel) {
+  /** @type {MailCommandOptions} */
+  const options = { ...clientOptions(global) };
+  let requireMatch = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token.startsWith("-") || token === "-") {
+      throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", `${commandLabel} does not accept positional arguments`, {
+        command: commandLabel,
+        args,
+      });
+    }
+
+    const option = splitOption(token);
+    if (option.name === "--require-match") {
+      if (option.value !== undefined) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--require-match does not accept a value", { flag: option.name });
+      }
+      requireMatch = true;
+      options.requireMatch = true;
+      continue;
+    }
+
+    if (option.name === "--match") {
+      options.matchText = parseMatchText(option.value ?? readCommandOptionValue(args, ++index, option.name));
+      continue;
+    }
+
+    if (option.name === "--folder") {
+      options.folder = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--limit") {
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      const limit = Number(value);
+      if (!Number.isInteger(limit) || limit <= 0) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_LIMIT", "--limit must be a positive integer", { value });
+      }
+      options.limit = limit;
+      continue;
+    }
+
+    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
+  }
+
+  return { options, requireMatch };
+}
+
+/**
+ * @param {unknown} result
+ * @param {boolean} requireMatch
+ */
+function normalizeMailListResult(result, requireMatch) {
+  const object = toRecord(result);
+  if (object.success === false) {
+    return normalizeMailFailure(object, requireMatch);
+  }
+
+  const messages = sanitizeMailMessages(Array.isArray(object.messages) ? object.messages : Array.isArray(result) ? result : []);
+  const status = messages.length > 0 ? "matched" : "no_match";
+  if (requireMatch && messages.length === 0) {
+    throw new CliError(CLI_EXIT.USAGE, "NO_MATCH", "No matching Proton Mail messages found", { status });
+  }
+
+  return {
+    ...sanitizeMailOutput(object),
+    success: object.success ?? true,
+    status,
+    source: object.source || "unknown",
+    count: messages.length,
+    messages,
+  };
+}
+
+/**
+ * @param {unknown} result
+ * @param {boolean} requireMatch
+ */
+function normalizeMailLatestResult(result, requireMatch) {
+  const object = toRecord(result);
+  if (object.success === false) {
+    return normalizeMailFailure(object, requireMatch);
+  }
+
+  const message = sanitizeMailMessage(object.message || result);
+  const hasMessage = Object.keys(message).length > 0;
+  const status = hasMessage ? "matched" : "no_match";
+  if (requireMatch && !hasMessage) {
+    throw new CliError(CLI_EXIT.USAGE, "NO_MATCH", "No matching Proton Mail message found", { status });
+  }
+
+  return {
+    ...sanitizeMailOutput(object),
+    success: object.success ?? true,
+    status,
+    source: object.source || "unknown",
+    message: hasMessage ? message : null,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} object
+ * @param {boolean} requireMatch
+ */
+function normalizeMailFailure(object, requireMatch) {
+  const status = classifyMailFailure(object);
+  const error = String(redact(object.error || mailFailureMessage(status)));
+  const data = {
+    ...sanitizeMailOutput(object),
+    success: false,
+    status,
+    error,
+  };
+  if (!requireMatch) return data;
+  throw new CliError(CLI_EXIT.USAGE, mailFailureCode(status), mailFailureMessage(status), { status, error });
+}
+
+/** @param {Record<string, unknown>} result */
+function classifyMailFailure(result) {
+  const message = String(result.error || "");
+  if (/No matching Proton Mail message found|No matching Proton Mail messages found/iu.test(message)) return "no_match";
+  if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
+  if (/credential|auth|login/iu.test(message)) return "auth_error";
+  return "upstream_failure";
+}
+
+/** @param {string} status */
+function mailFailureCode(status) {
+  if (status === "no_match") return "NO_MATCH";
+  if (status === "session_expired") return "SESSION_EXPIRED";
+  if (status === "auth_error") return "AUTH_REQUIRED";
+  return "MAIL_COMMAND_FAILED";
+}
+
+/** @param {string} status */
+function mailFailureMessage(status) {
+  if (status === "no_match") return "No matching Proton Mail message found";
+  if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
+  if (status === "auth_error") return "Proton Mail credentials or session are required";
+  return "Proton Mail command failed";
+}
+
+/** @param {unknown[]} messages */
+function sanitizeMailMessages(messages) {
+  return messages.map(sanitizeMailMessage).filter((message) => Object.keys(message).length > 0);
+}
+
+/** @param {unknown} message */
+function sanitizeMailMessage(message) {
+  const object = toRecord(message);
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  if (object.ref !== undefined) output.ref = object.ref;
+  if (object.ref === undefined && object.index !== undefined) output.ref = `browser:index:${object.index}`;
+  for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "time", "receivedAt", "preview"]) {
+    if (object[key] !== undefined) output[key] = object[key];
+  }
+  return output;
+}
+
+/** @param {Record<string, unknown>} result */
+function sanitizeMailOutput(result) {
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const [key, value] of Object.entries(result)) {
+    if (["browser", "context", "page", "debugEvents", "bodyText"].includes(key)) continue;
+    if (key === "error" || key === "lastError") {
+      output[key] = redact(value);
+      continue;
+    }
+    if (key === "message") {
+      output[key] = sanitizeMailMessage(value);
+      continue;
+    }
+    if (key === "messages") continue;
+    output[key] = value;
+  }
+  return output;
 }
 
 /**
@@ -709,7 +900,8 @@ function renderList(data) {
   if (messages.length === 0) return "No messages.\n";
   return `${messages.map((message) => {
     const item = toRecord(message);
-    return `${item.ID || item.id || "<unknown>"}\t${item.Subject || item.subject || "(no subject)"}`;
+    const ref = item.ref || item.ID || item.id || (item.index ?? "<unknown>");
+    return `${ref}\t${item.Subject || item.subject || item.preview || "(no subject)"}`;
   }).join("\n")}\n`;
 }
 
