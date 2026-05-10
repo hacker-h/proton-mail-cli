@@ -9,7 +9,7 @@ The browser client is the canonical dependency surface when other local projects
 
 ## CLI Usage
 
-This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls` and `pm mail latest` are browser-backed in the installed binary and use saved-session reuse. `pm read` remains an injected-client contract until the CLI has a stable message-reference contract for plaintext reads.
+This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls`, `pm mail search`, `pm mail latest`, and `pm read browser:index:N` are browser-backed in the installed binary and use saved-session reuse.
 
 Local workspace usage:
 
@@ -28,7 +28,7 @@ pm ls
 pm ls --match github --limit 5 --json
 pm mail latest
 pm mail search --match github --json
-pm read <messageId>
+pm read browser:index:0
 pm otp --match openai --json
 pm otp --provider github --poll-interval 2 --timeout 60 --require-match
 ```
@@ -47,13 +47,14 @@ Global flags:
 
 ### Mail Listing and Latest Message
 
-`pm ls` / `pm mail list` scan Proton Mail through the browser backend. `pm mail search` filters browser message previews and requires `--match`. `pm mail latest` opens the latest matching message and returns safe metadata in JSON while omitting body text, browser handles, and debug events.
+`pm ls` / `pm mail list` scan Proton Mail through the browser backend. `pm mail search` filters browser message previews and requires `--match`. `pm mail latest` opens the latest matching message and returns safe metadata in JSON while omitting body text, browser handles, and debug events. `pm read` accepts the explicit `browser:index:N` refs returned by list/search and intentionally includes `bodyText`.
 
 ```bash
 pm ls --limit 10
 pm ls --match '/github/i' --folder all-mail --json
 pm mail search --match github --require-match --json
 pm mail latest --match openai --require-match --json
+pm read browser:index:0 --json
 ```
 
 Command-specific mail flags:
@@ -65,7 +66,7 @@ Command-specific mail flags:
 | `--limit <count>` | Limit how many message previews are scanned. |
 | `--require-match` | Exit non-zero when no matching message is found. |
 
-Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List output includes preview snippets because listing mail is the command purpose; it never includes full message bodies.
+Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`.
 
 ### OTP and Link Extraction
 

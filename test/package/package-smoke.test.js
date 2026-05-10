@@ -53,14 +53,14 @@ describe("installed pm package smoke", () => {
     assert.equal(importCheck.stderr, "");
 
     const failure = run(pm, ["read", "msg1", "--json"], { cwd: appDir, env });
-    assert.equal(failure.status, 2, failure.stderr);
+    assert.equal(failure.status, 1, failure.stderr);
     assert.equal(failure.stdout, "");
 
     const envelope = JSON.parse(failure.stderr);
     assert.equal(envelope.ok, false);
     assert.equal(envelope.command, "mail:read");
     assert.equal(envelope.data, null);
-    assert.equal(envelope.error.code, "FEATURE_NOT_IMPLEMENTED");
+    assert.equal(envelope.error.code, "INVALID_MESSAGE_REF");
     assert.equal(envelope.meta.envelope, "pm.v1");
 
     const mailUsage = run(pm, ["ls", "--limit", "not-a-number", "--json"], { cwd: appDir, env });

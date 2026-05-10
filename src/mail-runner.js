@@ -6,6 +6,13 @@ export function filterMailMessages(messages, matchText) {
   return messages.filter((message) => matchesPreview(message, matchText));
 }
 
+/** @param {string} ref */
+export function parseBrowserMessageRef(ref) {
+  const match = /^browser:index:(\d+)$/u.exec(ref);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
 /**
  * @param {unknown} message
  * @param {string | RegExp | undefined} matchText

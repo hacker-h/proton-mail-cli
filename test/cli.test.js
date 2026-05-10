@@ -215,7 +215,7 @@ describe("pm CLI runner", () => {
     const readIo = createIo();
     const otpIo = createIo();
     const latest = mock.fn(async () => ({ message: { subject: "Latest" } }));
-    const read = mock.fn(async (messageId) => ({ id: messageId, subject: "Read" }));
+    const read = mock.fn(async (messageId) => ({ message: { id: messageId, subject: "Read", bodyText: "Body" } }));
     const get = mock.fn(async () => ({ code: "123456" }));
 
     assert.equal(await runPmCli({ argv: ["mail", "latest", "--json"], clients: { mail: { latest } }, ...latestIo }), CLI_EXIT.OK);
@@ -223,9 +223,83 @@ describe("pm CLI runner", () => {
     assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...otpIo }), CLI_EXIT.OK);
 
     assert.equal(JSON.parse(latestIo.stdoutText()).command, "mail:latest");
-    assert.equal(JSON.parse(readIo.stdoutText()).data.id, "msg42");
+    assert.equal(JSON.parse(readIo.stdoutText()).data.message.id, "msg42");
     assert.equal(JSON.parse(otpIo.stdoutText()).data.code, "123456");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
+  });
+
+  it("passes config, session, and timeout to mail read clients", async () => {
+    const io = createIo();
+    const read = mock.fn(async (messageId) => ({ message: { id: messageId, subject: "Read", bodyText: "Body" } }));
+    const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pm-config-home-"));
+
+    let exitCode;
+    await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
+      exitCode = await runPmCli({
+        argv: ["read", "browser:index:2", "--timeout", "21", "--session", "session.json", "--json"],
+        clients: { mail: { read } },
+        ...io,
+      });
+    });
+
+    assert.equal(exitCode, CLI_EXIT.OK);
+    assert.equal(read.mock.calls[0].arguments[0], "browser:index:2");
+    assert.deepEqual(read.mock.calls[0].arguments[1], {
+      timeout: 21,
+      config: path.join(configHome, "proton-mail-cli", "config.json"),
+      session: path.resolve("session.json"),
+      quiet: false,
+      verbose: false,
+      format: "json",
+    });
+  });
+
+  it("normalizes read results and preserves explicit body output", async () => {
+    const io = createIo();
+    const read = mock.fn(async () => ({
+      success: true,
+      source: "browser",
+      message: {
+        index: 2,
+        subject: "Read subject",
+        preview: "Preview line",
+        bodyText: "Full body text",
+      },
+      debugEvents: [{ message: "selector detail" }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["read", "browser:index:2", "--json"], clients: { mail: { read } }, ...io }), CLI_EXIT.OK);
+    const envelopeText = io.stdoutText();
+    const envelope = JSON.parse(envelopeText);
+    assert.deepEqual(envelope.data.message, {
+      ref: "browser:index:2",
+      index: 2,
+      subject: "Read subject",
+      preview: "Preview line",
+      bodyText: "Full body text",
+    });
+    assert.equal(envelopeText.includes("debugEvents"), false);
+    assert.equal(read.mock.calls[0].arguments[0], "browser:index:2");
+  });
+
+  it("prints read bodies in human mode", async () => {
+    const io = createIo();
+    const read = mock.fn(async () => ({ message: { subject: "Read subject", bodyText: "Full body text" } }));
+
+    assert.equal(await runPmCli({ argv: ["read", "browser:index:2"], clients: { mail: { read } }, ...io }), CLI_EXIT.OK);
+    assert.equal(io.stdoutText(), "Full body text\n");
+    assert.equal(io.stderrText(), "");
+  });
+
+  it("returns structured read failures", async () => {
+    const io = createIo();
+    const read = mock.fn(async () => ({ success: false, error: "No matching Proton Mail message found user@example.com" }));
+
+    assert.equal(await runPmCli({ argv: ["read", "browser:index:99", "--json"], clients: { mail: { read } }, ...io }), CLI_EXIT.USAGE);
+    const envelopeText = io.stderrText();
+    const envelope = JSON.parse(envelopeText);
+    assert.equal(envelope.error.code, "NO_MATCH");
+    assert.equal(envelopeText.includes("user@example.com"), false);
   });
 
   it("normalizes mail latest results and omits message bodies", async () => {

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { filterMailMessages } from "../src/mail-runner.js";
+import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 
 describe("mail runner helpers", () => {
   it("filters previews with case-insensitive text", () => {
@@ -21,5 +21,11 @@ describe("mail runner helpers", () => {
     ];
 
     assert.deepEqual(filterMailMessages(messages, /github/gi), messages);
+  });
+
+  it("parses only explicit browser message refs", () => {
+    assert.equal(parseBrowserMessageRef("browser:index:12"), 12);
+    assert.equal(parseBrowserMessageRef("12"), null);
+    assert.equal(parseBrowserMessageRef("msg_123"), null);
   });
 });
