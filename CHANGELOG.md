@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.8.0...v1.9.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** add table output format ([1c6800f](https://github.com/hacker-h/proton-mail-cli/commit/1c6800fa6aeb108f9ec4ccb9c760d4e37c28a10d))
+
 # [1.8.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.7.0...v1.8.0) (2026-05-10)
 
 
