@@ -3,7 +3,7 @@ import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.
 
 /**
  * @typedef {{ write(chunk: string): unknown }} WritableLike
- * @typedef {"human" | "json"} CliFormat
+ * @typedef {"human" | "json" | "table"} CliFormat
  * @typedef {{ format: CliFormat, timeout: number | null, config: string | null, session: string | null, quiet: boolean, verbose: boolean, help: boolean, version: boolean }} GlobalOptions
  * @typedef {{ command: string, args: string[] }} NormalizedCommand
  * @typedef {{ command: string, args: string[], global: GlobalOptions }} ParsedCommand
@@ -160,8 +160,8 @@ export function parseArgv(argv) {
     const option = splitOption(token);
     if (option.name === "--format") {
       const value = option.value ?? readOptionValue(argv, ++index, option.name);
-      if (value !== "human" && value !== "json") {
-        throw new CliError(CLI_EXIT.USAGE, "INVALID_FORMAT", "--format must be human or json", { value });
+      if (value !== "human" && value !== "json" && value !== "table") {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_FORMAT", "--format must be human, json, or table", { value });
       }
       global.format = value;
       continue;
@@ -736,7 +736,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm mail search --match <text> [--json]\n  pm read <messageId> [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
