@@ -1,3 +1,12 @@
+# [1.11.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.10.0...v1.11.0) (2026-05-10)
+
+
+### Features
+
+* **cli:** use rest metadata backend ([198f0ab](https://github.com/hacker-h/proton-mail-cli/commit/198f0ab6b662ef1a9fcaf55c6e038f54aa9330c4))
+* **config:** resolve rest session file ([b953fc6](https://github.com/hacker-h/proton-mail-cli/commit/b953fc63d59711ade6abbfa1aa99b081cfb7b035))
+* **rest:** add file session store ([0a4ce4c](https://github.com/hacker-h/proton-mail-cli/commit/0a4ce4c769decf14249157e3f39943e7e45d317c))
+
 # [1.10.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.9.0...v1.10.0) (2026-05-10)
 
 
