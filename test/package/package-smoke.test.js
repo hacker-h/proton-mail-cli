@@ -62,6 +62,13 @@ describe("installed pm package smoke", () => {
     assert.equal(envelope.data, null);
     assert.equal(envelope.error.code, "FEATURE_NOT_IMPLEMENTED");
     assert.equal(envelope.meta.envelope, "pm.v1");
+
+    const otpUsage = run(pm, ["otp", "--limit", "not-a-number", "--json"], { cwd: appDir, env });
+    assert.equal(otpUsage.status, 1, otpUsage.stderr);
+    assert.equal(otpUsage.stdout, "");
+    const otpEnvelope = JSON.parse(otpUsage.stderr);
+    assert.equal(otpEnvelope.command, "otp");
+    assert.equal(otpEnvelope.error.code, "INVALID_LIMIT");
   });
 });
 

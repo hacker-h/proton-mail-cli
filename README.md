@@ -9,7 +9,7 @@ The browser client is the canonical dependency surface when other local projects
 
 ## CLI Usage
 
-This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. Issue #1 defines the command contract only: help, version, global flags, aliases, dispatch, output envelopes, and stable exit codes. The mail commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login.
+This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. Mail list/read commands are intentionally stubs unless a caller injects client implementations into the runner; this keeps CI offline and avoids live Proton login. `pm otp` is browser-backed in the installed binary and uses saved-session reuse plus the extraction helpers documented below.
 
 Local workspace usage:
 
@@ -27,7 +27,8 @@ pm version
 pm ls
 pm mail latest
 pm read <messageId>
-pm otp --json
+pm otp --match openai --json
+pm otp --provider github --require-match
 ```
 
 Global flags:
@@ -41,6 +42,32 @@ Global flags:
 | `--session <path>` | Uses a Proton session state path. Overrides env and config files. |
 | `--quiet` | Suppresses human success output. Errors still go to stderr. |
 | `--verbose` | Passes verbose mode to injected clients. |
+
+### OTP and Link Extraction
+
+`pm otp` scans Proton Mail through the browser backend, using the configured saved session from `--session` / `PROTONMAIL_SESSION_FILE` or the OS cache default. It prints only the extracted code or link in human mode; JSON mode uses the standard envelope.
+
+```bash
+pm otp --match openai --json
+pm otp --provider github --require-match
+pm otp --match '/github/i' --pattern '\\b(?<code>[A-Z0-9]{4}-[A-Z0-9]{4})\\b'
+pm otp --provider magic-link --link-pattern 'https://example.com/\\S+' --json
+```
+
+Command-specific flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--provider <name>` | Use a provider preset such as `generic`, `github`, or `magic-link`. |
+| `--match <text\|/re/i>` | Select the latest email whose preview contains text or matches a regex literal. |
+| `--pattern <pattern>` | Override the OTP extraction regex. Named capture group `code` is preferred. |
+| `--otp-pattern <pattern>` | Alias for an explicit OTP extraction regex. |
+| `--link-pattern <pattern>` | Extract a matching URL; named capture group `link` or `url` is preferred. |
+| `--folder <name>` | Select the browser scan folder, for example `inbox` or `all-mail`. |
+| `--limit <count>` | Limit how many message previews are scanned. |
+| `--require-match` | Exit non-zero when no matching email/token/link is found. |
+
+Default no-match behavior is a successful empty result in JSON, suitable for scripts that poll externally. `--require-match` turns no match, matched-without-token, session expiry, and auth/setup failures into CI-friendly failures. OTP values and magic links are command output by design; do not run this command with public logs unless those outputs are masked or captured privately.
 
 Alias policy:
 

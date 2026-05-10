@@ -15,6 +15,7 @@ import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, requireMatch?: boolean }} OtpCommandOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
@@ -185,6 +186,11 @@ export function parseArgv(argv) {
       continue;
     }
 
+    if (positionals.length > 0) {
+      positionals.push(token);
+      continue;
+    }
+
     throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
   }
 
@@ -224,8 +230,9 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
   }
 
   if (command === "otp") {
-    expectArgs(args, 0, "pm otp");
-    const data = await callInjected(clients.otp?.get, [clientOptions(global)], "pm otp");
+    const { options, requireMatch } = parseOtpArgs(args, global);
+    const result = await callInjected(clients.otp?.get, [options], "pm otp");
+    const data = normalizeOtpResult(result, requireMatch);
     return { command, data, human: renderOtp(data) };
   }
 
@@ -243,6 +250,192 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     command,
     args,
   });
+}
+
+/**
+ * @param {string[]} args
+ * @param {GlobalOptions} global
+ * @returns {{ options: OtpCommandOptions, requireMatch: boolean }}
+ */
+function parseOtpArgs(args, global) {
+  /** @type {OtpCommandOptions} */
+  const options = { ...clientOptions(global) };
+  let requireMatch = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token.startsWith("-") || token === "-") {
+      throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", "pm otp does not accept positional arguments", {
+        command: "pm otp",
+        args,
+      });
+    }
+
+    const option = splitOption(token);
+    if (option.name === "--require-match") {
+      if (option.value !== undefined) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--require-match does not accept a value", { flag: option.name });
+      }
+      requireMatch = true;
+      options.requireMatch = true;
+      continue;
+    }
+
+    if (option.name === "--provider") {
+      options.provider = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--match") {
+      options.matchText = parseMatchText(option.value ?? readCommandOptionValue(args, ++index, option.name));
+      continue;
+    }
+
+    if (option.name === "--pattern") {
+      options.pattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--otp-pattern") {
+      options.otpPattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--link-pattern") {
+      options.linkPattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--folder") {
+      options.folder = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+
+    if (option.name === "--limit") {
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      const limit = Number(value);
+      if (!Number.isInteger(limit) || limit <= 0) {
+        throw new CliError(CLI_EXIT.USAGE, "INVALID_LIMIT", "--limit must be a positive integer", { value });
+      }
+      options.limit = limit;
+      continue;
+    }
+
+    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
+  }
+
+  return { options, requireMatch };
+}
+
+/**
+ * @param {string[]} args
+ * @param {number} index
+ * @param {string} optionName
+ */
+function readCommandOptionValue(args, index, optionName) {
+  const value = args[index];
+  if (value === undefined || value.startsWith("-") || isOtpOptionName(splitOption(value).name)) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_FLAG_VALUE", `${optionName} requires a value`, { flag: optionName });
+  }
+  return value;
+}
+
+/** @param {string} name */
+function isOtpOptionName(name) {
+  return [
+    "--require-match",
+    "--provider",
+    "--match",
+    "--pattern",
+    "--otp-pattern",
+    "--link-pattern",
+    "--folder",
+    "--limit",
+  ].includes(name);
+}
+
+/** @param {string} value */
+function parseMatchText(value) {
+  const literalMatch = /^\/([\s\S]+)\/([a-z]*)$/u.exec(value.trim());
+  if (!literalMatch) return value;
+  const [, source, flags] = literalMatch;
+  try {
+    return new RegExp(source, flags);
+  } catch (error) {
+    throw new CliError(CLI_EXIT.USAGE, "INVALID_MATCH_PATTERN", "--match must be plain text or a valid /pattern/flags expression", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * @param {unknown} result
+ * @param {boolean} requireMatch
+ */
+function normalizeOtpResult(result, requireMatch) {
+  const object = toRecord(result);
+  if (object.success === false) {
+    const status = classifyOtpFailure(object);
+    const error = String(object.error || otpFailureMessage(status));
+    const data = {
+      ...object,
+      success: false,
+      status,
+      codeFound: false,
+      linkFound: false,
+      error,
+    };
+    if (!requireMatch) return data;
+
+    throw new CliError(CLI_EXIT.USAGE, otpFailureCode(status), otpFailureMessage(status), {
+      status,
+      error,
+    });
+  }
+
+  const codeFound = typeof object.code === "string" && object.code.length > 0;
+  const linkFound = typeof object.link === "string" && object.link.length > 0;
+  const status = String(object.status || (codeFound || linkFound ? "matched" : "matched_without_token"));
+  if (requireMatch && !codeFound && !linkFound) {
+    throw new CliError(CLI_EXIT.USAGE, otpFailureCode(status), otpFailureMessage(status), {
+      status,
+    });
+  }
+  return {
+    ...object,
+    success: object.success ?? true,
+    status,
+    codeFound,
+    linkFound,
+  };
+}
+
+/** @param {Record<string, unknown>} result */
+function classifyOtpFailure(result) {
+  const message = String(result.error || "");
+  if (/No matching Proton Mail message found/iu.test(message)) return "no_match";
+  if (/Matching email found, but no/iu.test(message)) return "matched_without_token";
+  if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
+  if (/credential|auth|login/iu.test(message)) return "auth_error";
+  return "upstream_failure";
+}
+
+/** @param {string} status */
+function otpFailureCode(status) {
+  if (status === "no_match") return "NO_MATCH";
+  if (status === "matched_without_token") return "TOKEN_NOT_FOUND";
+  if (status === "session_expired") return "SESSION_EXPIRED";
+  if (status === "auth_error") return "AUTH_REQUIRED";
+  return "OTP_EXTRACTION_FAILED";
+}
+
+/** @param {string} status */
+function otpFailureMessage(status) {
+  if (status === "no_match") return "No matching Proton Mail message found";
+  if (status === "matched_without_token") return "Matching Proton Mail message found, but no OTP code or link was present";
+  if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
+  if (status === "auth_error") return "Proton Mail credentials or session are required";
+  return "OTP extraction failed";
 }
 
 /**
@@ -269,7 +462,7 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --json\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--json]\n  pm mail latest [--json]\n  pm read <messageId> [--json]\n  pm otp --match <text> --json\n  pm otp --provider github --require-match\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json>  Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm otp flags:\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
 }
 
 export class CliError extends Error {
@@ -494,6 +687,9 @@ function renderObject(data) {
 function renderOtp(data) {
   const object = toRecord(data);
   if (object.code) return `${object.code}\n`;
+  if (object.link) return `${object.link}\n`;
+  if (object.status === "no_match") return "No matching message.\n";
+  if (object.status === "matched_without_token") return "Matching message found, but no OTP code or link was present.\n";
   return renderObject(data);
 }
 

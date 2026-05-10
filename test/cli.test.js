@@ -17,7 +17,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm ls/u);
     assert.match(io.stdoutText(), /pm mail latest/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
-    assert.match(io.stdoutText(), /pm otp --json/u);
+    assert.match(io.stdoutText(), /pm otp --match <text> --json/u);
     assert.match(io.stdoutText(), /pm doctor config --json/u);
     assert.equal(io.stderrText(), "");
   });
@@ -55,6 +55,7 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
     assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
     assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
+    assert.deepEqual(parseArgv(["otp", "--provider", "github"]).args, ["--provider", "github"]);
 
     const parsed = parseArgv([
       "mail",
@@ -179,6 +180,118 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(readIo.stdoutText()).data.id, "msg42");
     assert.equal(JSON.parse(otpIo.stdoutText()).data.code, "123456");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
+  });
+
+  it("passes OTP extraction flags to injected clients", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({ success: true, code: "ABCD-1234" }));
+    const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pm-config-home-"));
+
+    let exitCode;
+    await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
+      exitCode = await runPmCli({
+        argv: [
+          "otp",
+          "--provider",
+          "github",
+          "--match",
+          "/github/i",
+          "--pattern",
+          "code: (?<code>[A-Z0-9-]+)",
+          "--link-pattern",
+          "https://example.com/\\S+",
+          "--folder",
+          "all-mail",
+          "--limit",
+          "5",
+          "--require-match",
+          "--json",
+          "--timeout",
+          "20",
+          "--session",
+          "session.json",
+        ],
+        clients: { otp: { get } },
+        ...io,
+      });
+    });
+
+    assert.equal(exitCode, CLI_EXIT.OK);
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.data.status, "matched");
+    assert.equal(envelope.data.codeFound, true);
+    assert.equal(get.mock.callCount(), 1);
+    const options = get.mock.calls[0].arguments[0];
+    assert.equal(options.provider, "github");
+    assert.equal(options.matchText instanceof RegExp, true);
+    assert.equal(options.matchText.test("GitHub"), true);
+    assert.equal(options.pattern, "code: (?<code>[A-Z0-9-]+)");
+    assert.equal(options.linkPattern, "https://example.com/\\S+");
+    assert.equal(options.folder, "all-mail");
+    assert.equal(options.limit, 5);
+    assert.equal(options.requireMatch, true);
+    assert.equal(options.timeout, 20);
+    assert.equal(options.session, path.resolve("session.json"));
+    assert.equal(options.config, path.join(configHome, "proton-mail-cli", "config.json"));
+  });
+
+  it("returns a successful empty OTP result unless --require-match is set", async () => {
+    const relaxed = createIo();
+    const required = createIo();
+    const get = mock.fn(async () => ({ success: false, error: "No matching Proton Mail message found" }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...relaxed }), CLI_EXIT.OK);
+    const relaxedEnvelope = JSON.parse(relaxed.stdoutText());
+    assert.equal(relaxedEnvelope.ok, true);
+    assert.equal(relaxedEnvelope.data.status, "no_match");
+    assert.equal(relaxedEnvelope.data.codeFound, false);
+    assert.equal(relaxed.stderrText(), "");
+
+    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...required }), CLI_EXIT.USAGE);
+    const requiredEnvelope = JSON.parse(required.stderrText());
+    assert.equal(requiredEnvelope.ok, false);
+    assert.equal(requiredEnvelope.error.code, "NO_MATCH");
+    assert.equal(requiredEnvelope.error.details.status, "no_match");
+    assert.equal(required.stdoutText(), "");
+  });
+
+  it("classifies successful OTP responses without tokens as matched-without-token", async () => {
+    const relaxed = createIo();
+    const required = createIo();
+    const get = mock.fn(async () => ({ success: true, message: { subject: "Verify" } }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...relaxed }), CLI_EXIT.OK);
+    const relaxedEnvelope = JSON.parse(relaxed.stdoutText());
+    assert.equal(relaxedEnvelope.data.status, "matched_without_token");
+    assert.equal(relaxedEnvelope.data.codeFound, false);
+    assert.equal(relaxedEnvelope.data.linkFound, false);
+
+    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...required }), CLI_EXIT.USAGE);
+    const requiredEnvelope = JSON.parse(required.stderrText());
+    assert.equal(requiredEnvelope.error.code, "TOKEN_NOT_FOUND");
+    assert.equal(requiredEnvelope.error.details.status, "matched_without_token");
+  });
+
+  it("rejects invalid OTP flags before dispatch", async () => {
+    const invalidLimit = createIo();
+    const unknown = createIo();
+    const get = mock.fn(async () => ({ code: "123456" }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--limit", "many", "--json"], clients: { otp: { get } }, ...invalidLimit }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(invalidLimit.stderrText()).error.code, "INVALID_LIMIT");
+
+    assert.equal(await runPmCli({ argv: ["otp", "--unknown", "--json"], clients: { otp: { get } }, ...unknown }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(unknown.stderrText()).error.code, "UNKNOWN_FLAG");
+    assert.equal(get.mock.callCount(), 0);
+  });
+
+  it("rejects missing OTP flag values before dispatch", async () => {
+    const io = createIo();
+    const get = mock.fn(async () => ({ code: "123456" }));
+
+    assert.equal(await runPmCli({ argv: ["otp", "--provider", "--unknown", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(io.stderrText()).error.code, "MISSING_FLAG_VALUE");
+    assert.equal(get.mock.callCount(), 0);
   });
 
   it("returns a contract stub error without live clients", async () => {
