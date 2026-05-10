@@ -73,7 +73,7 @@ Command-specific mail flags:
 | `--limit <count>` | Limit how many message previews are scanned. |
 | `--require-match` | Exit non-zero when no matching message is found. |
 
-The installed `pm` binary remains browser-backed for mail commands; REST metadata filters are surfaced in injected client options as `metadataFilter` for callers that wire `ProtonMailClient.getMessageMetadata()`. Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
+The installed `pm ls` uses REST metadata listing when metadata filters are present and `PROTONMAIL_REST_SESSION_FILE` or `restSessionFile` is configured; otherwise mail commands remain browser-backed. REST metadata filters are also surfaced in injected client options as `metadataFilter` for callers that wire `ProtonMailClient.getMessageMetadata()`. Mail JSON uses `status`, `source`, `sessionValid`, `inboxMessageCount`, `count`, and sanitized `messages`/`message` fields. List/search output includes preview snippets because listing mail is the command purpose; it never includes full message bodies. Read output is the only mail command that includes `bodyText`. Use `--format table` when you want the same tabular human output explicitly.
 
 ### OTP and Link Extraction
 
@@ -378,6 +378,7 @@ Notes:
 | `PROTONMAIL_PASSWORD_COMMAND` | Command that prints the Proton password | Yes | Used when direct and file password sources are unset | `src/config.js` secret resolution |
 | `PROTONMAIL_ENV_FILE` | Absolute path to an env file containing credentials | No | Default: unset; if unset, tries `./env.env` then `./.env` | `src/browser-client.js`, `scripts/debug-login.mjs` |
 | `PROTONMAIL_SESSION_FILE` | Override path to the Playwright session JSON file for scripts | No | Default (script behavior): `data/protonmail-auth.json` | `scripts/capture-session.mjs`, `scripts/debug-login.mjs`, `scripts/set-session-secret.mjs` |
+| `PROTONMAIL_REST_SESSION_FILE` | Override path to a REST session-store JSON file for metadata-filtered CLI listing | Yes | Default: unset; required by installed `pm ls` when REST metadata filters are used | `src/config.js`, `bin/pm.js`, REST metadata CLI docs |
 | `PROTONMAIL_TIMEOUT_SECONDS` | Positive integer timeout for injected CLI clients | No | Default: command-specific or unset | `src/config.js`, CLI tests |
 | `PROTONMAIL_SESSION_JSON` | Seed session JSON (minimized Playwright storage state) for CI/live tests | Yes | Default: unset; when set, CI writes it to an isolated session file before running live tests | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md`, `scripts/capture-session.mjs`, `scripts/set-session-secret.mjs`, `DEBUG.md` |
 | `PROTONMAIL_SESSION_CACHE_KEY` | Encryption key for short-lived cached session payloads (`.ci-proton/session.enc`) | Yes | Default: unset; when unset, workflow skips saving cache; if a cache exists, decryption requires this key. Recommended: ≥32 random bytes (see `SECURITY.md`) | `.github/workflows/live-proton.yml`, `scripts/session-cache.mjs`, `docs/ci.md` |
