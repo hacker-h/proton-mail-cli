@@ -130,8 +130,9 @@ if (result.success) {
   await new Promise(() => {});
 } else {
   console.log(`[protonmail-debug] Login result: ${result.error || 'unknown'}`);
-  if (result.debug?.cdpEndpoint) {
-    console.log(`[protonmail-debug] Browser still open at: ${result.debug.cdpEndpoint}`);
+  const debug = result.debug && typeof result.debug === "object" ? /** @type {{ cdpEndpoint?: string }} */ (result.debug) : {};
+  if (debug.cdpEndpoint) {
+    console.log(`[protonmail-debug] Browser still open at: ${debug.cdpEndpoint}`);
     console.log('[protonmail-debug] Attach with: chrome://inspect or Playwright MCP connectOverCDP');
     // Keep process alive for manual interaction
     await new Promise(() => {});

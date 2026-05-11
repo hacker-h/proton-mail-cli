@@ -36,6 +36,13 @@ const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/5
 let browser;
 let context;
 
+class ProbeStop extends Error {
+  constructor(code) {
+    super("Probe stopped");
+    this.code = code;
+  }
+}
+
 try {
   if (profileDir) {
     context = await chromium.launchPersistentContext(profileDir, {
@@ -108,13 +115,6 @@ try {
 } finally {
   await context?.close().catch(() => {});
   await browser?.close().catch(() => {});
-}
-
-class ProbeStop extends Error {
-  constructor(code) {
-    super("Probe stopped");
-    this.code = code;
-  }
 }
 
 async function firstVisible(page, selectors, timeout) {

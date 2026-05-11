@@ -108,7 +108,7 @@ async function runMailActionFromRest(options) {
   if (options.fromSearch) {
     const result = await client.getMessageMetadata(options.metadataFilter || {}, 0, options.limit || undefined);
     ids = normalizeActionIds(result.messages
-      .map((message) => message && typeof message === "object" ? message.ID : "")
+      .map((message) => message && typeof message === "object" ? /** @type {Record<string, unknown>} */ (message).ID : "")
       .filter((id) => typeof id === "string" && id.length > 0));
   }
 
