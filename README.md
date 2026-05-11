@@ -296,7 +296,7 @@ See [docs/session-store.md](docs/session-store.md) for the full method contract,
 - FIDO2/WebAuthn during auth
 - Import messages
 - Undo actions
-- Search
+- Proton server-side search beyond browser preview filtering and REST metadata filters
 - Filters/Rules
 - Settings
 - Guaranteed fresh-login success when Proton presents CAPTCHA/human verification
