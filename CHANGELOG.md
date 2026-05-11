@@ -1,3 +1,28 @@
+# [2.0.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.12.0...v2.0.0) (2026-05-11)
+
+
+* feat!: remove built-in OTP extraction ([1bb4978](https://github.com/hacker-h/proton-mail-cli/commit/1bb4978b2d66eca5db8e2d620571cf2c0a2e66f7))
+
+
+### Bug Fixes
+
+* **client:** validate mail mutation identifiers ([6d849eb](https://github.com/hacker-h/proton-mail-cli/commit/6d849eb13d2b40ea906b1a53accd9215c570bfbe))
+
+
+### Features
+
+* **bin:** wire REST mail action runner ([2099f65](https://github.com/hacker-h/proton-mail-cli/commit/2099f65323233b9597bca49a4cef81c4f641fff1))
+* **cli:** add safe mail action commands ([60a1ef3](https://github.com/hacker-h/proton-mail-cli/commit/60a1ef3ebdc79ead88288f26d9924f1e501e8053))
+
+
+### BREAKING CHANGES
+
+* remove pm otp, browser extractOtpCode, OTP helper exports, and built-in OTP polling.
+
+Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-openagent)
+
+Co-authored-by: Sisyphus <clio-agent@sisyphuslabs.ai>
+
 # [1.12.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.11.0...v1.12.0) (2026-05-10)
 
 
