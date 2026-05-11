@@ -84,17 +84,15 @@ describe("installed pm package smoke", () => {
     assert.equal(searchUsage.stdout, "");
     assert.equal(JSON.parse(searchUsage.stderr).error.code, "MISSING_MATCH");
 
-    const otpUsage = run(pm, ["otp", "--limit", "not-a-number", "--json"], { cwd: appDir, env });
-    assert.equal(otpUsage.status, 1, otpUsage.stderr);
-    assert.equal(otpUsage.stdout, "");
-    const otpEnvelope = JSON.parse(otpUsage.stderr);
-    assert.equal(otpEnvelope.command, "otp");
-    assert.equal(otpEnvelope.error.code, "INVALID_LIMIT");
+    const actionUsage = run(pm, ["mail", "mark-read", "browser:index:0", "--json"], { cwd: appDir, env });
+    assert.equal(actionUsage.status, 1, actionUsage.stderr);
+    assert.equal(actionUsage.stdout, "");
+    assert.equal(JSON.parse(actionUsage.stderr).error.code, "INVALID_MESSAGE_ID");
 
-    const pollUsage = run(pm, ["otp", "--poll-interval", "never", "--json"], { cwd: appDir, env });
-    assert.equal(pollUsage.status, 1, pollUsage.stderr);
-    assert.equal(pollUsage.stdout, "");
-    assert.equal(JSON.parse(pollUsage.stderr).error.code, "INVALID_POLL_INTERVAL");
+    const actionConfirm = run(pm, ["mail", "mark-read", "--from-search", "--subject", "Invoice", "--json"], { cwd: appDir, env });
+    assert.equal(actionConfirm.status, 1, actionConfirm.stderr);
+    assert.equal(actionConfirm.stdout, "");
+    assert.equal(JSON.parse(actionConfirm.stderr).error.code, "CONFIRMATION_REQUIRED");
   });
 });
 

@@ -139,69 +139,63 @@ export class ProtonMailClient {
 
   /**
    * @param {string[]} messageIds
-   * @returns {Promise<void>}
+   * @returns {Promise<unknown[]>}
    */
   async deleteMessages(messageIds) {
-    for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
-      await this.#http.request("PUT", "/mail/v4/messages/delete", {
-        uid: this.#uid,
-        body: { IDs: chunk },
-      });
-    }
+    return this.#mutateMessageIds("/mail/v4/messages/delete", validateMessageIds(messageIds));
   }
 
   /**
    * @param {string[]} messageIds
-   * @returns {Promise<void>}
+   * @returns {Promise<unknown[]>}
    */
   async markMessagesRead(messageIds) {
-    for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
-      await this.#http.request("PUT", "/mail/v4/messages/read", {
-        uid: this.#uid,
-        body: { IDs: chunk },
-      });
-    }
+    return this.#mutateMessageIds("/mail/v4/messages/read", validateMessageIds(messageIds));
   }
 
   /**
    * @param {string[]} messageIds
-   * @returns {Promise<void>}
+   * @returns {Promise<unknown[]>}
    */
   async markMessagesUnread(messageIds) {
-    for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
-      await this.#http.request("PUT", "/mail/v4/messages/unread", {
-        uid: this.#uid,
-        body: { IDs: chunk },
-      });
-    }
+    return this.#mutateMessageIds("/mail/v4/messages/unread", validateMessageIds(messageIds));
   }
 
   /**
    * @param {string[]} messageIds
    * @param {string} labelId
-   * @returns {Promise<void>}
+   * @returns {Promise<unknown[]>}
    */
   async labelMessages(messageIds, labelId) {
-    for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
-      await this.#http.request("PUT", "/mail/v4/messages/label", {
-        uid: this.#uid,
-        body: { LabelID: labelId, IDs: chunk },
-      });
-    }
+    validateLabelId(labelId);
+    return this.#mutateMessageIds("/mail/v4/messages/label", validateMessageIds(messageIds), labelId);
   }
 
   /**
    * @param {string[]} messageIds
    * @param {string} labelId
-   * @returns {Promise<void>}
+   * @returns {Promise<unknown[]>}
    */
   async unlabelMessages(messageIds, labelId) {
+    validateLabelId(labelId);
+    return this.#mutateMessageIds("/mail/v4/messages/unlabel", validateMessageIds(messageIds), labelId);
+  }
+
+  /**
+   * @param {string} pathname
+   * @param {string[]} messageIds
+   * @param {string} [labelId]
+   * @returns {Promise<unknown[]>}
+   */
+  async #mutateMessageIds(pathname, messageIds, labelId) {
+    const responses = [];
     for (const chunk of chunks(messageIds, MAX_BATCH_IDS)) {
-      await this.#http.request("PUT", "/mail/v4/messages/unlabel", {
+      responses.push(await this.#http.request("PUT", pathname, {
         uid: this.#uid,
-        body: { LabelID: labelId, IDs: chunk },
-      });
+        body: { ...(labelId === undefined ? {} : { LabelID: labelId }), IDs: chunk },
+      }));
     }
+    return responses;
   }
 
   /**
@@ -372,6 +366,29 @@ export class ProtonMailClient {
    */
   async api(method, pathname, options = {}) {
     return this.#http.request(method, pathname, { uid: this.#uid, ...options });
+  }
+}
+
+
+/** @param {string[]} messageIds */
+function validateMessageIds(messageIds) {
+  if (!Array.isArray(messageIds) || messageIds.length === 0) {
+    throw new TypeError("messageIds must be a non-empty array");
+  }
+  return messageIds.map((messageId) => {
+    const id = String(messageId || "").trim();
+    if (!id || /^browser:index:/u.test(id) || /[\s\u0000-\u001f]/u.test(id)) {
+      throw new TypeError("messageIds must contain explicit Proton message IDs");
+    }
+    return id;
+  });
+}
+
+/** @param {string} labelId */
+function validateLabelId(labelId) {
+  const id = String(labelId || "").trim();
+  if (!id || /[\s\u0000-\u001f]/u.test(id)) {
+    throw new TypeError("labelId must be a non-empty Proton label ID");
   }
 }
 

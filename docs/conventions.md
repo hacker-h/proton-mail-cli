@@ -115,19 +115,7 @@ Default no-match behavior should be a successful empty result when absence is ex
 
 `pm ls` / `pm mail list`, `pm mail search`, and `pm mail latest` follow the same search-like contract. Browser-backed list/search output may include preview snippets but must not include full message bodies, browser handles, or debug events. `pm read browser:index:N` is the explicit plaintext read path and may include `bodyText`.
 
-`pm otp` follows this contract only for the deprecation window. It is deprecated for removal in the next major version; new automation should use mail list/read APIs and parse message bodies in user-owned code. In human mode it prints only the extracted code or link plus a deprecation warning on stderr; in JSON mode it includes stable booleans such as `codeFound` and `linkFound`, `status`, and deprecation metadata. JSON output must omit message bodies, previews, browser handles, debug events, warnings, and progress text. The command may reveal the requested OTP/link by design, so tests and logs must never print message bodies, session state, credentials, or unrelated mailbox metadata.
-
-Deprecated `pm otp` command-specific flags retained until the next major version:
-
-- `--provider <name>` selects a provider preset.
-- `--match <text|/re/i>` filters email previews before extraction.
-- `--pattern <pattern>` or `--otp-pattern <pattern>` overrides OTP extraction.
-- `--link-pattern <pattern>` extracts links with named capture group `link` or `url` preferred.
-- `--folder <name>` and `--limit <count>` control browser scanning scope.
-- `--poll-interval <seconds>` retries no-match and matched-without-token results until `--timeout` elapses.
-- `--require-match` turns absence into a failure exit for CI jobs.
-
-Fixture-backed examples are preferred for OTP integration tests. Do not send live email to a provider unless a separate live/regression workflow explicitly requires it.
+Mail action commands (`pm mail mark-read`, `mark-unread`, `label`, `unlabel`, `trash`, and `delete`) use REST message IDs only. Browser refs such as `browser:index:N` must be rejected before API calls. Selection-based actions must require `--from-search` plus `--dry-run` or `--yes`; no interactive prompt is required for automation-first use. JSON action output must include deterministic `action`, `dryRun`, `requested`, `affected`, `skipped`, and `failed` fields.
 
 ## Config and Secrets
 
@@ -144,7 +132,7 @@ Secret values resolve in this order:
 2. file variable, such as `PROTONMAIL_PASSWORD_FILE`
 3. command variable, such as `PROTONMAIL_PASSWORD_COMMAND`
 
-Doctor commands may report sources and readiness. They must never print secret values, cookies, Playwright storage state, full email addresses, message bodies, OTP codes, magic links, or authorization headers.
+Doctor commands may report sources and readiness. They must never print secret values, cookies, Playwright storage state, full email addresses, message bodies, magic links, or authorization headers.
 
 ## Backend Boundaries
 
@@ -152,7 +140,6 @@ Doctor commands may report sources and readiness. They must never print secret v
 - REST-backed commands may list metadata and perform supported API mutations when a valid session store is available.
 - Browser-backed commands may read plaintext mailbox content from saved Playwright session state.
 - Until native decryption exists, docs and output should clearly state when plaintext body reads require the browser backend.
-- Proton Bridge support must remain optional and must use the same output envelope as REST/browser-backed commands.
 
 ## Testing Requirements
 

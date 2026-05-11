@@ -2,8 +2,8 @@
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
+import { Labels, MAX_BATCH_IDS } from "../src/constants.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
-import { extractOtpWithPolling } from "../src/otp-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 
 const exitCode = await runPmCli({
@@ -14,9 +14,7 @@ const exitCode = await runPmCli({
       latest: latestMailFromBrowser,
       search: searchMailFromBrowser,
       read: readMailFromBrowser,
-    },
-    otp: {
-      get: extractOtpFromBrowser,
+      action: runMailActionFromRest,
     },
   },
 });
@@ -87,15 +85,139 @@ async function readMailFromBrowser(messageRef, options) {
   return { ...result, source: "browser" };
 }
 
-async function extractOtpFromBrowser(options) {
-  const client = browserClient(options);
-  return extractOtpWithPolling(options, (attemptOptions) => client.extractOtpCode({
-    ...browserOptions(attemptOptions),
-    provider: attemptOptions.provider,
-    pattern: attemptOptions.pattern,
-    otpPattern: attemptOptions.otpPattern,
-    linkPattern: attemptOptions.linkPattern,
-  }));
+async function runMailActionFromRest(options) {
+  if (!options.restSessionFile) {
+    return {
+      success: false,
+      status: "rest_session_missing",
+      source: "rest",
+      action: options.action,
+      dryRun: options.dryRun,
+      requested: 0,
+      affected: [],
+      skipped: [],
+      failed: [],
+      error: "REST mail actions require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config",
+    };
+  }
+
+  const client = restClient(options);
+  const skipped = Array.isArray(options.skipped) ? [...options.skipped] : [];
+  let ids = Array.isArray(options.ids) ? [...options.ids] : [];
+
+  if (options.fromSearch) {
+    const result = await client.getMessageMetadata(options.metadataFilter || {}, 0, options.limit || undefined);
+    ids = normalizeActionIds(result.messages
+      .map((message) => message && typeof message === "object" ? message.ID : "")
+      .filter((id) => typeof id === "string" && id.length > 0));
+  }
+
+  if (options.dryRun) {
+    return {
+      success: true,
+      status: "dry_run",
+      source: "rest",
+      action: options.action,
+      labelId: options.labelId,
+      dryRun: true,
+      requested: ids.length + skipped.length,
+      affected: [],
+      skipped: [...skipped, ...ids.map((id) => ({ id, reason: "dry_run" }))],
+      failed: [],
+    };
+  }
+
+  const affected = [];
+  const failed = [];
+  for (const chunk of chunks(ids, MAX_BATCH_IDS)) {
+    try {
+      const responses = await applyMailActionChunk(client, options, chunk);
+      const upstreamFailures = actionFailuresFromResponses(responses);
+      if (upstreamFailures.length > 0) {
+        const failedIds = new Set(upstreamFailures.map((failure) => failure.id));
+        affected.push(...chunk.filter((id) => !failedIds.has(id)));
+        failed.push(...upstreamFailures);
+      } else {
+        affected.push(...chunk);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failed.push(...chunk.map((id) => ({ id, code: "MAIL_ACTION_FAILED", message })));
+    }
+  }
+
+  return {
+    success: failed.length === 0,
+    status: failed.length > 0 ? "partial_failure" : "applied",
+    source: "rest",
+    action: options.action,
+    labelId: options.labelId,
+    dryRun: false,
+    requested: ids.length + skipped.length,
+    affected,
+    skipped,
+    failed,
+  };
+}
+
+function restClient(options) {
+  return new ProtonMailClient({
+    sessionStore: new FileSessionStore(options.restSessionFile),
+    timeoutMs: options.timeout ? options.timeout * 1000 : undefined,
+  });
+}
+
+async function applyMailActionChunk(client, options, ids) {
+  if (options.action === "mark-read") return client.markMessagesRead(ids);
+  if (options.action === "mark-unread") return client.markMessagesUnread(ids);
+  if (options.action === "label") return client.labelMessages(ids, options.labelId);
+  if (options.action === "unlabel") return client.unlabelMessages(ids, options.labelId);
+  if (options.action === "trash") return client.labelMessages(ids, Labels.TRASH);
+  if (options.action === "delete") return client.deleteMessages(ids);
+  throw new Error(`Unknown mail action: ${options.action}`);
+}
+
+function normalizeActionIds(values) {
+  const seen = new Set();
+  const ids = [];
+  for (const value of values) {
+    const id = String(value || "").trim();
+    if (!id || /^browser:index:/u.test(id) || /[\s\u0000-\u001f]/u.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function actionFailuresFromResponses(responses) {
+  const failures = [];
+  for (const response of Array.isArray(responses) ? responses : [responses]) {
+    const candidates = Array.isArray(response?.Responses)
+      ? response.Responses
+      : Array.isArray(response?.responses)
+        ? response.responses
+        : [];
+    for (const candidate of candidates) {
+      const id = candidate?.ID || candidate?.id;
+      const payload = candidate?.Response || candidate?.response || candidate;
+      const code = payload?.Code ?? payload?.code;
+      if (!id || code === undefined || code === 1000) continue;
+      failures.push({
+        id: String(id),
+        code: String(code),
+        message: String(payload?.Error || payload?.error || "Proton Mail action failed"),
+      });
+    }
+  }
+  return failures;
+}
+
+function chunks(values, size) {
+  const result = [];
+  for (let index = 0; index < values.length; index += size) {
+    result.push(values.slice(index, index + size));
+  }
+  return result;
 }
 
 function browserClient(options) {

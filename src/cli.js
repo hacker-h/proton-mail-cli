@@ -9,19 +9,18 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {{ command: string, args: string[] }} NormalizedCommand
  * @typedef {{ command: string, args: string[], global: GlobalOptions }} ParsedCommand
  * @typedef {(...args: unknown[]) => unknown | Promise<unknown>} CliHandler
- * @typedef {{ list?: CliHandler, latest?: CliHandler, search?: CliHandler, read?: CliHandler }} CliMailClient
- * @typedef {{ get?: CliHandler }} CliOtpClient
+ * @typedef {{ list?: CliHandler, latest?: CliHandler, search?: CliHandler, read?: CliHandler, action?: CliHandler }} CliMailClient
  * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
- * @typedef {{ mail?: CliMailClient, otp?: CliOtpClient, doctor?: CliDoctorClient }} CliClients
+ * @typedef {{ mail?: CliMailClient, doctor?: CliDoctorClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
- * @typedef {{ command: string, data: unknown, human: string, warning?: string }} CommandResult
+ * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
- * @typedef {ClientOptions & { provider?: string, matchText?: string | RegExp, pattern?: string, otpPattern?: string, linkPattern?: string, folder?: string, limit?: number, pollInterval?: number, requireMatch?: boolean }} OtpCommandOptions
+ * @typedef {ClientOptions & { action: string, ids: string[], labelId?: string, fromSearch: boolean, dryRun: boolean, yes: boolean, skipped: unknown[], requested: number, matchText?: string | RegExp, folder?: string, limit?: number, subject?: string, from?: string, to?: string, labelIdFilter?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailActionOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
- * @typedef {{ command: string, data: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string, human?: string, warning?: string }} WriteSuccessOptions
+ * @typedef {{ command: string, data: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string, human?: string }} WriteSuccessOptions
  * @typedef {{ command: string, error: unknown, global: GlobalOptions, stdout: WritableLike, stderr: WritableLike, version: string }} WriteFailureOptions
  */
 
@@ -34,11 +33,14 @@ export const CLI_EXIT = Object.freeze({
 
 const DEFAULT_FORMAT = "human";
 const VERSION = readPackageVersion();
-const OTP_DEPRECATION = Object.freeze({
-  deprecated: true,
-  removal: "next-major",
-  message: "Built-in OTP/link extraction is deprecated. Use mail read/list APIs and parse message bodies in your own automation.",
-  docs: "docs/deprecations.md",
+/** @type {Readonly<Record<string, { action: string, requiresLabel?: boolean }>>} */
+const MAIL_ACTIONS = Object.freeze({
+  "mail:mark-read": Object.freeze({ action: "mark-read" }),
+  "mail:mark-unread": Object.freeze({ action: "mark-unread" }),
+  "mail:label": Object.freeze({ action: "label", requiresLabel: true }),
+  "mail:unlabel": Object.freeze({ action: "unlabel", requiresLabel: true }),
+  "mail:trash": Object.freeze({ action: "trash" }),
+  "mail:delete": Object.freeze({ action: "delete" }),
 });
 
 /**
@@ -114,7 +116,6 @@ export async function runPmCli(options = {}) {
       stderr,
       version,
       human: result.human,
-      warning: result.warning,
     });
   } catch (error) {
     return writeFailure({ command: command || "pm", error, global, stdout, stderr, version });
@@ -255,11 +256,12 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     return { command, data, human: renderRead(data) };
   }
 
-  if (command === "otp") {
-    const { options, requireMatch } = parseOtpArgs(args, global);
-    const result = await callInjected(clients.otp?.get, [options], "pm otp");
-    const data = { ...normalizeOtpResult(result, requireMatch), deprecation: OTP_DEPRECATION };
-    return { command, data, human: renderOtp(data), warning: OTP_DEPRECATION.message };
+  if (MAIL_ACTIONS[command]) {
+    const actionConfig = MAIL_ACTIONS[command];
+    const options = parseMailActionArgs(args, global, actionConfig, command.replace(":", " "));
+    const result = await callInjected(clients.mail?.action, [options], `pm ${command.replace(":", " ")}`);
+    const data = normalizeMailActionResult(result, options);
+    return { command, data, human: renderMailAction(data) };
   }
 
   if (command === "doctor:config") {
@@ -386,6 +388,175 @@ function parseMailArgs(args, global, commandLabel) {
   const metadataFilter = buildMailMetadataFilter(options);
   if (Object.keys(metadataFilter).length > 0) options.metadataFilter = metadataFilter;
   return { options, requireMatch };
+}
+
+/**
+ * @param {string[]} args
+ * @param {GlobalOptions} global
+ * @param {{ action: string, requiresLabel?: boolean }} actionConfig
+ * @param {string} commandLabel
+ * @returns {MailActionOptions}
+ */
+function parseMailActionArgs(args, global, actionConfig, commandLabel) {
+  /** @type {MailActionOptions} */
+  const options = {
+    ...clientOptions(global),
+    action: actionConfig.action,
+    ids: [],
+    fromSearch: false,
+    dryRun: false,
+    yes: false,
+    skipped: [],
+    requested: 0,
+  };
+  /** @type {string[]} */
+  const rawIds = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token.startsWith("-") || token === "-") {
+      rawIds.push(token);
+      continue;
+    }
+
+    const option = splitOption(token);
+    if (option.name === "--dry-run") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--dry-run does not accept a value", { flag: option.name });
+      options.dryRun = true;
+      continue;
+    }
+    if (option.name === "--yes") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--yes does not accept a value", { flag: option.name });
+      options.yes = true;
+      continue;
+    }
+    if (option.name === "--from-search") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--from-search does not accept a value", { flag: option.name });
+      options.fromSearch = true;
+      continue;
+    }
+    if (option.name === "--label" || option.name === "--label-id") {
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      if (actionConfig.requiresLabel) {
+        options.labelId = value;
+      } else {
+        options.labelIdFilter = value;
+      }
+      continue;
+    }
+    if (option.name === "--match") {
+      options.matchText = parseMatchText(option.value ?? readCommandOptionValue(args, ++index, option.name));
+      continue;
+    }
+    if (option.name === "--folder") {
+      options.folder = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--subject") {
+      options.subject = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--from" || option.name === "--sender") {
+      options.from = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--to") {
+      options.to = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--unread") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--unread does not accept a value", { flag: option.name });
+      if (options.read) throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_FLAGS", "--read and --unread cannot be used together");
+      options.unread = true;
+      continue;
+    }
+    if (option.name === "--read") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--read does not accept a value", { flag: option.name });
+      if (options.unread) throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_FLAGS", "--read and --unread cannot be used together");
+      options.read = true;
+      continue;
+    }
+    if (option.name === "--after") {
+      options.after = parseMailTimestamp(option.value ?? readCommandOptionValue(args, ++index, option.name), option.name);
+      continue;
+    }
+    if (option.name === "--before") {
+      options.before = parseMailTimestamp(option.value ?? readCommandOptionValue(args, ++index, option.name), option.name);
+      continue;
+    }
+    if (option.name === "--limit") {
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      const limit = Number(value);
+      if (!Number.isInteger(limit) || limit <= 0) throw new CliError(CLI_EXIT.USAGE, "INVALID_LIMIT", "--limit must be a positive integer", { value });
+      options.limit = limit;
+      continue;
+    }
+    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
+  }
+
+  if (actionConfig.requiresLabel && !options.labelId) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_LABEL", `${commandLabel} requires --label <labelId>`);
+  }
+  if (options.fromSearch && rawIds.length > 0) {
+    throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_SELECTION", `${commandLabel} accepts message IDs or --from-search, not both`);
+  }
+  if (!options.fromSearch && rawIds.length === 0) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_MESSAGE_ID", `${commandLabel} requires at least one message ID or --from-search`);
+  }
+  if (options.fromSearch && !options.dryRun && !options.yes) {
+    throw new CliError(CLI_EXIT.USAGE, "CONFIRMATION_REQUIRED", `${commandLabel} --from-search requires --dry-run or --yes`);
+  }
+
+  const metadataFilter = buildMailMetadataFilter({
+    subject: options.subject,
+    from: options.from,
+    to: options.to,
+    labelId: options.labelIdFilter,
+    unread: options.unread,
+    read: options.read,
+    after: options.after,
+    before: options.before,
+  });
+  if (Object.keys(metadataFilter).length > 0) options.metadataFilter = metadataFilter;
+  if (options.fromSearch && options.matchText) {
+    throw new CliError(CLI_EXIT.USAGE, "UNSUPPORTED_SEARCH_MATCH", `${commandLabel} --from-search supports REST metadata filters, not --match preview searches`);
+  }
+  if (options.fromSearch && !options.metadataFilter) {
+    throw new CliError(CLI_EXIT.USAGE, "MISSING_SEARCH_FILTER", `${commandLabel} --from-search requires at least one REST metadata filter`);
+  }
+
+  const normalized = normalizeMessageIds(rawIds);
+  options.ids = normalized.ids;
+  options.skipped = normalized.skipped;
+  options.requested = rawIds.length;
+  return options;
+}
+
+/** @param {string[]} rawIds */
+function normalizeMessageIds(rawIds) {
+  const seen = new Set();
+  /** @type {string[]} */
+  const ids = [];
+  /** @type {unknown[]} */
+  const skipped = [];
+  for (const rawId of rawIds) {
+    const id = String(rawId || "").trim();
+    if (!isValidMessageId(id)) {
+      throw new CliError(CLI_EXIT.USAGE, "INVALID_MESSAGE_ID", "Message IDs must be explicit Proton message IDs, not browser refs or empty values", { id });
+    }
+    if (seen.has(id)) {
+      skipped.push({ id, reason: "duplicate" });
+      continue;
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  return { ids, skipped };
+}
+
+/** @param {string} id */
+function isValidMessageId(id) {
+  return Boolean(id) && !/^browser:index:/u.test(id) && !/[\s\u0000-\u001f]/u.test(id);
 }
 
 /**
@@ -569,90 +740,7 @@ function sanitizeMailOutput(result) {
   return output;
 }
 
-/**
- * @param {string[]} args
- * @param {GlobalOptions} global
- * @returns {{ options: OtpCommandOptions, requireMatch: boolean }}
- */
-function parseOtpArgs(args, global) {
-  /** @type {OtpCommandOptions} */
-  const options = { ...clientOptions(global) };
-  let requireMatch = false;
 
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (!token.startsWith("-") || token === "-") {
-      throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", "pm otp does not accept positional arguments", {
-        command: "pm otp",
-        args,
-      });
-    }
-
-    const option = splitOption(token);
-    if (option.name === "--require-match") {
-      if (option.value !== undefined) {
-        throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--require-match does not accept a value", { flag: option.name });
-      }
-      requireMatch = true;
-      options.requireMatch = true;
-      continue;
-    }
-
-    if (option.name === "--provider") {
-      options.provider = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      continue;
-    }
-
-    if (option.name === "--match") {
-      options.matchText = parseMatchText(option.value ?? readCommandOptionValue(args, ++index, option.name));
-      continue;
-    }
-
-    if (option.name === "--pattern") {
-      options.pattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      continue;
-    }
-
-    if (option.name === "--otp-pattern") {
-      options.otpPattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      continue;
-    }
-
-    if (option.name === "--link-pattern") {
-      options.linkPattern = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      continue;
-    }
-
-    if (option.name === "--folder") {
-      options.folder = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      continue;
-    }
-
-    if (option.name === "--limit") {
-      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      const limit = Number(value);
-      if (!Number.isInteger(limit) || limit <= 0) {
-        throw new CliError(CLI_EXIT.USAGE, "INVALID_LIMIT", "--limit must be a positive integer", { value });
-      }
-      options.limit = limit;
-      continue;
-    }
-
-    if (option.name === "--poll-interval") {
-      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
-      const pollInterval = Number(value);
-      if (!Number.isInteger(pollInterval) || pollInterval <= 0) {
-        throw new CliError(CLI_EXIT.USAGE, "INVALID_POLL_INTERVAL", "--poll-interval must be a positive integer", { value });
-      }
-      options.pollInterval = pollInterval;
-      continue;
-    }
-
-    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
-  }
-
-  return { options, requireMatch };
-}
 
 /**
  * @param {string[]} args
@@ -661,21 +749,17 @@ function parseOtpArgs(args, global) {
  */
 function readCommandOptionValue(args, index, optionName) {
   const value = args[index];
-  if (value === undefined || value.startsWith("-") || isOtpOptionName(splitOption(value).name)) {
+  if (value === undefined || value.startsWith("-") || isCommandOptionName(splitOption(value).name)) {
     throw new CliError(CLI_EXIT.USAGE, "MISSING_FLAG_VALUE", `${optionName} requires a value`, { flag: optionName });
   }
   return value;
 }
 
 /** @param {string} name */
-function isOtpOptionName(name) {
+function isCommandOptionName(name) {
   return [
     "--require-match",
-    "--provider",
     "--match",
-    "--pattern",
-    "--otp-pattern",
-    "--link-pattern",
     "--folder",
     "--label",
     "--label-id",
@@ -688,7 +772,9 @@ function isOtpOptionName(name) {
     "--after",
     "--before",
     "--limit",
-    "--poll-interval",
+    "--dry-run",
+    "--yes",
+    "--from-search",
   ].includes(name);
 }
 
@@ -708,101 +794,53 @@ function parseMatchText(value) {
 
 /**
  * @param {unknown} result
- * @param {boolean} requireMatch
+ * @param {MailActionOptions} options
  */
-function normalizeOtpResult(result, requireMatch) {
+function normalizeMailActionResult(result, options) {
   const object = toRecord(result);
-  if (object.success === false) {
-    const status = classifyOtpFailure(object);
-    const error = String(object.error || otpFailureMessage(status));
-    const data = sanitizeOtpOutput({
-      ...object,
-      success: false,
-      status,
-      codeFound: false,
-      linkFound: false,
-      error,
-    });
-    if (!requireMatch) return data;
+  const failed = sanitizeActionFailures(Array.isArray(object.failed) ? object.failed : []);
+  const skippedSource = Array.isArray(object.skipped) ? object.skipped : Array.isArray(options.skipped) ? options.skipped : [];
+  const skipped = sanitizeActionFailures(skippedSource);
+  const affected = sanitizeIdList(Array.isArray(object.affected) ? object.affected : []);
+  const status = String(object.status || (options.dryRun ? "dry_run" : failed.length > 0 ? "partial_failure" : "applied"));
+  const error = object.error === undefined ? undefined : String(redact(object.error));
 
-    throw new CliError(CLI_EXIT.USAGE, otpFailureCode(status), otpFailureMessage(status), {
-      status,
-      error,
-    });
+  if (object.success === false && ["rest_session_missing", "session_expired", "auth_error"].includes(status)) {
+    throw new CliError(CLI_EXIT.USAGE, mailFailureCode(status), mailFailureMessage(status), { status, error });
   }
 
-  const codeFound = typeof object.code === "string" && object.code.length > 0;
-  const linkFound = typeof object.link === "string" && object.link.length > 0;
-  const status = String(object.status || (codeFound || linkFound ? "matched" : "matched_without_token"));
-  if (requireMatch && !codeFound && !linkFound) {
-    throw new CliError(CLI_EXIT.USAGE, otpFailureCode(status), otpFailureMessage(status), {
-      status,
-    });
-  }
-  return sanitizeOtpOutput({
-    ...object,
-    success: object.success ?? true,
+  return {
+    success: object.success ?? failed.length === 0,
     status,
-    codeFound,
-    linkFound,
-  });
+    source: object.source || "unknown",
+    action: object.action || options.action,
+    labelId: object.labelId || options.labelId || undefined,
+    dryRun: object.dryRun ?? options.dryRun,
+    requested: Number(object.requested ?? options.requested ?? 0),
+    affected,
+    skipped,
+    failed,
+    ...(error === undefined ? {} : { error }),
+  };
 }
 
-/** @param {Record<string, unknown>} result */
-function sanitizeOtpOutput(result) {
-  /** @type {Record<string, unknown>} */
-  const output = {};
-  for (const [key, value] of Object.entries(result)) {
-    if (["browser", "context", "page", "debugEvents", "bodyText", "preview"].includes(key)) continue;
-    if (key === "error" || key === "lastError") {
-      output[key] = redact(value);
-      continue;
-    }
-    output[key] = key === "message" ? sanitizeOtpMessage(value) : value;
-  }
-  return output;
+/** @param {unknown[]} values */
+function sanitizeIdList(values) {
+  return values.map((value) => String(value || "").trim()).filter(Boolean);
 }
 
-/** @param {unknown} message */
-function sanitizeOtpMessage(message) {
-  const object = toRecord(message);
-  /** @type {Record<string, unknown>} */
-  const output = {};
-  for (const key of ["id", "ID", "index", "subject", "Subject", "from", "sender", "receivedAt", "time"]) {
-    if (object[key] !== undefined) output[key] = object[key];
-  }
-  return output;
-}
-
-/** @param {Record<string, unknown>} result */
-function classifyOtpFailure(result) {
-  const message = String(result.error || "");
-  if (result.timeout || /timed out waiting/iu.test(message)) return "timeout";
-  if (/No matching Proton Mail message found/iu.test(message)) return "no_match";
-  if (/Matching email found, but no/iu.test(message)) return "matched_without_token";
-  if (result.sessionExpired || /expired/iu.test(message)) return "session_expired";
-  if (/credential|auth|login/iu.test(message)) return "auth_error";
-  return "upstream_failure";
-}
-
-/** @param {string} status */
-function otpFailureCode(status) {
-  if (status === "no_match") return "NO_MATCH";
-  if (status === "matched_without_token") return "TOKEN_NOT_FOUND";
-  if (status === "session_expired") return "SESSION_EXPIRED";
-  if (status === "auth_error") return "AUTH_REQUIRED";
-  if (status === "timeout") return "TIMEOUT";
-  return "OTP_EXTRACTION_FAILED";
-}
-
-/** @param {string} status */
-function otpFailureMessage(status) {
-  if (status === "no_match") return "No matching Proton Mail message found";
-  if (status === "matched_without_token") return "Matching Proton Mail message found, but no OTP code or link was present";
-  if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
-  if (status === "auth_error") return "Proton Mail credentials or session are required";
-  if (status === "timeout") return "Timed out waiting for matching Proton Mail OTP or link";
-  return "OTP extraction failed";
+/** @param {unknown[]} values */
+function sanitizeActionFailures(values) {
+  return values.map((value) => {
+    const object = toRecord(value);
+    const id = String(object.id || "").trim();
+    /** @type {Record<string, string>} */
+    const output = { id };
+    if (object.reason !== undefined) output.reason = String(redact(object.reason));
+    if (object.code !== undefined) output.code = String(redact(object.code));
+    if (object.message !== undefined) output.message = String(redact(object.message));
+    return output;
+  }).filter((value) => value.id);
 }
 
 /**
@@ -829,7 +867,61 @@ function expectArgs(args, expectedCount, commandLabel) {
 }
 
 export function rootHelp(version = VERSION) {
-  return `pm ${version}\n\nUsage:\n  pm help\n  pm version\n  pm ls [--format table] [--json]\n  pm mail latest [--format table] [--json]\n  pm mail search --match <text> [--format table] [--json]\n  pm read <messageId> [--format table] [--json]\n  pm otp --match <text> --json    Deprecated; removal planned for next major\n  pm doctor config --json\n  pm doctor session --json\n\nGlobal flags:\n  --json                 Emit a stable JSON envelope\n  --format <human|json|table> Select output format\n  --timeout <seconds>    Set command timeout for injected clients\n  --config <path>        Read CLI config from path\n  --session <path>       Use Proton session state path\n  --quiet                Suppress human success output\n  --verbose              Include verbose client context\n\npm mail flags:\n  --match <text|/re/i>   Match message previews for latest/search/list\n  --folder <name>        Select inbox or all-mail browser scan target\n  --label <id>           Add a REST metadata LabelID filter for injected clients\n  --label-id <id>        Alias for --label\n  --subject <text>       Add a REST metadata subject filter for injected clients\n  --from <text>          Add a REST metadata sender filter for injected clients\n  --sender <text>        Alias for --from\n  --to <text>            Add a REST metadata recipient filter for injected clients\n  --read | --unread      Add a REST metadata read-state filter for injected clients\n  --after <date|ts>      Add a REST metadata lower time bound\n  --before <date|ts>     Add a REST metadata upper time bound\n  --limit <count>        Maximum message previews to scan\n  --require-match        Exit non-zero when no matching message is found\n\npm otp flags:\n  Deprecated: parse message bodies in user automation instead of relying on pm otp.\n  --provider <name>      Use an OTP/link provider preset, e.g. generic, github, magic-link\n  --match <text|/re/i>   Match an email preview before extraction\n  --pattern <pattern>    Override the OTP extraction pattern\n  --otp-pattern <pattern> Override the OTP extraction pattern\n  --link-pattern <pattern> Extract a matching link instead of only an OTP code\n  --folder <name>        Select inbox or all-mail browser scan target\n  --limit <count>        Maximum message previews to scan\n  --poll-interval <sec>  Retry no-match results until --timeout elapses\n  --require-match        Exit non-zero when no matching token is found\n\nAliases:\n  pm ls                  Alias for pm mail list\n  pm list                Alias for pm mail list\n  pm inbox               Alias for pm mail list\n  pm read <messageId>    Alias for pm mail read <messageId>\n  pm doctor auth         Alias for pm doctor session\n`;
+  return `pm ${version}
+
+Usage:
+  pm help
+  pm version
+  pm ls [--format table] [--json]
+  pm mail latest [--format table] [--json]
+  pm mail search --match <text> [--format table] [--json]
+  pm read <messageId> [--format table] [--json]
+  pm mail mark-read <messageId...> [--json]
+  pm mail mark-unread <messageId...> [--json]
+  pm mail label --label <labelId> <messageId...> [--json]
+  pm mail unlabel --label <labelId> <messageId...> [--json]
+  pm mail trash <messageId...> [--json]
+  pm mail delete <messageId...> [--yes] [--json]
+  pm doctor config --json
+  pm doctor session --json
+
+Global flags:
+  --json                 Emit a stable JSON envelope
+  --format <human|json|table> Select output format
+  --timeout <seconds>    Set command timeout for injected clients
+  --config <path>        Read CLI config from path
+  --session <path>       Use Proton session state path
+  --quiet                Suppress human success output
+  --verbose              Include verbose client context
+
+pm mail filter flags:
+  --match <text|/re/i>   Match message previews for latest/search/list
+  --folder <name>        Select inbox or all-mail browser scan target
+  --label <id>           Add a REST metadata LabelID filter for injected clients
+  --label-id <id>        Alias for --label
+  --subject <text>       Add a REST metadata subject filter for injected clients
+  --from <text>          Add a REST metadata sender filter for injected clients
+  --sender <text>        Alias for --from
+  --to <text>            Add a REST metadata recipient filter for injected clients
+  --read | --unread      Add a REST metadata read-state filter for injected clients
+  --after <date|ts>      Add a REST metadata lower time bound
+  --before <date|ts>     Add a REST metadata upper time bound
+  --limit <count>        Maximum message previews to scan
+  --require-match        Exit non-zero when no matching message is found
+
+pm mail action flags:
+  --from-search          Select REST message IDs from filter flags instead of positional IDs
+  --dry-run              Report selected IDs without mutating mail
+  --yes                  Confirm a real --from-search mutation
+  --label <id>           Label ID for label/unlabel, or search filter for other actions
+
+Aliases:
+  pm ls                  Alias for pm mail list
+  pm list                Alias for pm mail list
+  pm inbox               Alias for pm mail list
+  pm read <messageId>    Alias for pm mail read <messageId>
+  pm doctor auth         Alias for pm doctor session
+`;
 }
 
 export class CliError extends Error {
@@ -909,7 +1001,6 @@ function normalizeCommand(positionals) {
   if (first === "version") return { command: "version", args: positionals.slice(1) };
   if (["ls", "list", "inbox"].includes(first)) return { command: "mail:list", args: positionals.slice(1) };
   if (first === "read") return { command: "mail:read", args: positionals.slice(1) };
-  if (first === "otp") return { command: "otp", args: positionals.slice(1) };
 
   if (first === "doctor") {
     if (second === "config") return { command: "doctor:config", args: rest };
@@ -964,13 +1055,12 @@ function clientOptions(global) {
 }
 
 /** @param {WriteSuccessOptions} options */
-function writeSuccess({ command, data, global, stdout, stderr, version, human, warning }) {
+function writeSuccess({ command, data, global, stdout, stderr, version, human }) {
   if (global.format === "json") {
     stdout.write(`${JSON.stringify(jsonEnvelope({ ok: true, command, data, version }))}\n`);
     return CLI_EXIT.OK;
   }
 
-  if (warning) stderr.write(`${warning}\n`);
   if (!global.quiet && human) stdout.write(human.endsWith("\n") ? human : `${human}\n`);
   return CLI_EXIT.OK;
 }
@@ -1062,13 +1152,15 @@ function renderRead(data) {
 }
 
 /** @param {unknown} data */
-function renderOtp(data) {
+function renderMailAction(data) {
   const object = toRecord(data);
-  if (object.code) return `${object.code}\n`;
-  if (object.link) return `${object.link}\n`;
-  if (object.status === "no_match") return "No matching message.\n";
-  if (object.status === "matched_without_token") return "Matching message found, but no OTP code or link was present.\n";
-  return renderObject(data);
+  const action = object.action || "action";
+  const affected = Array.isArray(object.affected) ? object.affected.length : 0;
+  const skipped = Array.isArray(object.skipped) ? object.skipped.length : 0;
+  const failed = Array.isArray(object.failed) ? object.failed.length : 0;
+  if (object.status === "dry_run") return `Dry run: ${skipped} message(s) selected for ${action}.\n`;
+  if (object.status === "partial_failure") return `${action}: ${affected} affected, ${failed} failed, ${skipped} skipped.\n`;
+  return `${action}: ${affected} affected, ${skipped} skipped.\n`;
 }
 
 /** @param {unknown} data */

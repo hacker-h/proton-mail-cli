@@ -175,6 +175,19 @@ describe("ProtonMailClient", () => {
     assert.deepEqual(body.IDs, ["m1", "m2"]);
   });
 
+
+  it("markMessagesUnread calls PUT /mail/v4/messages/unread", async () => {
+    const fetchImpl = mockFetch(200, { Code: 1000 });
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    await client.markMessagesUnread(["m1"]);
+
+    const [calledUrl, fetchOptions] = fetchImpl.mock.calls[0].arguments;
+    assert.ok(calledUrl.toString().includes("/mail/v4/messages/unread"));
+    assert.equal(fetchOptions.method, "PUT");
+    assert.deepEqual(JSON.parse(fetchOptions.body).IDs, ["m1"]);
+  });
+
   it("labelMessages calls PUT /mail/v4/messages/label", async () => {
     const fetchImpl = mockFetch(200, { Code: 1000 });
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
@@ -185,6 +198,31 @@ describe("ProtonMailClient", () => {
     const body = JSON.parse(fetchOptions.body);
     assert.equal(body.LabelID, Labels.STARRED);
     assert.deepEqual(body.IDs, ["m1"]);
+  });
+
+
+  it("unlabelMessages calls PUT /mail/v4/messages/unlabel", async () => {
+    const fetchImpl = mockFetch(200, { Code: 1000 });
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    await client.unlabelMessages(["m1"], Labels.STARRED);
+
+    const [calledUrl, fetchOptions] = fetchImpl.mock.calls[0].arguments;
+    assert.ok(calledUrl.toString().includes("/mail/v4/messages/unlabel"));
+    const body = JSON.parse(fetchOptions.body);
+    assert.equal(body.LabelID, Labels.STARRED);
+    assert.deepEqual(body.IDs, ["m1"]);
+  });
+
+
+  it("rejects invalid message mutation IDs before API calls", async () => {
+    const fetchImpl = mockFetch(200, { Code: 1000 });
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    await assert.rejects(() => client.markMessagesRead(["browser:index:0"]), /explicit Proton message IDs/u);
+    await assert.rejects(() => client.deleteMessages([]), /non-empty array/u);
+    await assert.rejects(() => client.labelMessages(["m1"], ""), /labelId/u);
+    assert.equal(fetchImpl.mock.callCount(), 0);
   });
 
   it("getLabels calls /core/v4/labels for each type", async () => {
@@ -240,12 +278,15 @@ describe("ProtonMailClient", () => {
     const fetchImpl = mockFetch(200, { Code: 1000 });
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
 
-    const ids = Array.from({ length: 5 }, (_, i) => `m${i}`);
+    const ids = Array.from({ length: 151 }, (_, i) => `m${i}`);
     await client.deleteMessages(ids);
 
+    assert.equal(fetchImpl.mock.callCount(), 2);
     const [calledUrl, fetchOptions] = fetchImpl.mock.calls[0].arguments;
     assert.ok(calledUrl.toString().includes("/mail/v4/messages/delete"));
     assert.equal(fetchOptions.method, "PUT");
+    assert.equal(JSON.parse(fetchOptions.body).IDs.length, 150);
+    assert.deepEqual(JSON.parse(fetchImpl.mock.calls[1].arguments[1].body).IDs, ["m150"]);
   });
 
   it("returns raw attachment bytes with binary request headers", async () => {

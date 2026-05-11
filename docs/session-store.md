@@ -54,7 +54,7 @@ There is no stable public Proton TTL guarantee. In CI, keep reuse windows short;
 
 `ProtonMailBrowserClient` detects saved-session expiry when a stored session file is loaded, Proton redirects the mailbox navigation back to the login page, and no inbox indicators are visible.
 
-Browser read methods such as `getInboxMessages()`, `getLatestMessage()`, and `extractOtpCode()` return a structured failure:
+Browser read methods such as `getInboxMessages()` and `getLatestMessage()` return a structured failure:
 
 ```js
 {
