@@ -18,7 +18,7 @@ describe("pm CLI runner", () => {
     assert.match(io.stdoutText(), /pm mail latest/u);
     assert.match(io.stdoutText(), /pm mail search --match <text>/u);
     assert.match(io.stdoutText(), /pm read <messageId>/u);
-    assert.match(io.stdoutText(), /pm otp --match <text> --json.*Deprecated/u);
+    assert.match(io.stdoutText(), /pm mail mark-read <messageId...>/u);
     assert.match(io.stdoutText(), /pm doctor config --json/u);
     assert.equal(io.stderrText(), "");
   });
@@ -57,7 +57,7 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
     assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
     assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
-    assert.deepEqual(parseArgv(["otp", "--provider", "github"]).args, ["--provider", "github"]);
+    assert.equal(parseArgv(["mail", "mark-read", "msg1"]).command, "mail:mark-read");
 
     const parsed = parseArgv([
       "mail",
@@ -264,21 +264,21 @@ describe("pm CLI runner", () => {
     });
   });
 
-  it("dispatches mail latest, read, and otp with JSON envelopes", async () => {
+  it("dispatches mail latest, read, and action commands with JSON envelopes", async () => {
     const latestIo = createIo();
     const readIo = createIo();
-    const otpIo = createIo();
+    const actionIo = createIo();
     const latest = mock.fn(async () => ({ message: { subject: "Latest" } }));
     const read = mock.fn(async (messageId) => ({ message: { id: messageId, subject: "Read", bodyText: "Body" } }));
-    const get = mock.fn(async () => ({ code: "123456" }));
+    const action = mock.fn(async () => ({ success: true, source: "rest", action: "mark-read", affected: ["msg42"], skipped: [], failed: [] }));
 
     assert.equal(await runPmCli({ argv: ["mail", "latest", "--json"], clients: { mail: { latest } }, ...latestIo }), CLI_EXIT.OK);
     assert.equal(await runPmCli({ argv: ["read", "msg42", "--json"], clients: { mail: { read } }, ...readIo }), CLI_EXIT.OK);
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...otpIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "msg42", "--json"], clients: { mail: { action } }, ...actionIo }), CLI_EXIT.OK);
 
     assert.equal(JSON.parse(latestIo.stdoutText()).command, "mail:latest");
     assert.equal(JSON.parse(readIo.stdoutText()).data.message.id, "msg42");
-    assert.equal(JSON.parse(otpIo.stdoutText()).data.code, "123456");
+    assert.equal(JSON.parse(actionIo.stdoutText()).data.action, "mark-read");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
   });
 
@@ -490,222 +490,114 @@ describe("pm CLI runner", () => {
     assert.equal(list.mock.callCount(), 0);
   });
 
-  it("passes OTP extraction flags to injected clients", async () => {
+
+  it("passes explicit mail action IDs to injected clients", async () => {
     const io = createIo();
-    const get = mock.fn(async () => ({ success: true, code: "ABCD-1234" }));
-    const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "pm-config-home-"));
-
-    let exitCode;
-    await withEnv({ XDG_CONFIG_HOME: configHome }, async () => {
-      exitCode = await runPmCli({
-        argv: [
-          "otp",
-          "--provider",
-          "github",
-          "--match",
-          "/github/i",
-          "--pattern",
-          "code: (?<code>[A-Z0-9-]+)",
-          "--link-pattern",
-          "https://example.com/\\S+",
-          "--folder",
-          "all-mail",
-          "--limit",
-          "5",
-          "--poll-interval",
-          "2",
-          "--require-match",
-          "--json",
-          "--timeout",
-          "20",
-          "--session",
-          "session.json",
-        ],
-        clients: { otp: { get } },
-        ...io,
-      });
-    });
-
-    assert.equal(exitCode, CLI_EXIT.OK);
-    const envelope = JSON.parse(io.stdoutText());
-    assert.equal(envelope.data.status, "matched");
-    assert.equal(envelope.data.codeFound, true);
-    assert.equal(envelope.data.deprecation.deprecated, true);
-    assert.equal(envelope.data.deprecation.removal, "next-major");
-    assert.equal(envelope.data.deprecation.docs, "docs/deprecations.md");
-    assert.equal(io.stderrText(), "");
-    assert.equal(get.mock.callCount(), 1);
-    const options = get.mock.calls[0].arguments[0];
-    assert.equal(options.provider, "github");
-    assert.equal(options.matchText instanceof RegExp, true);
-    assert.equal(options.matchText.test("GitHub"), true);
-    assert.equal(options.pattern, "code: (?<code>[A-Z0-9-]+)");
-    assert.equal(options.linkPattern, "https://example.com/\\S+");
-    assert.equal(options.folder, "all-mail");
-    assert.equal(options.limit, 5);
-    assert.equal(options.pollInterval, 2);
-    assert.equal(options.requireMatch, true);
-    assert.equal(options.timeout, 20);
-    assert.equal(options.session, path.resolve("session.json"));
-    assert.equal(options.config, path.join(configHome, "proton-mail-cli", "config.json"));
-  });
-
-  it("prints a human deprecation warning for pm otp", async () => {
-    const io = createIo();
-    const get = mock.fn(async () => ({ success: true, code: "123456" }));
-
-    assert.equal(await runPmCli({ argv: ["otp"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
-
-    assert.equal(io.stdoutText(), "123456\n");
-    assert.match(io.stderrText(), /deprecated/u);
-
-    const quiet = createIo();
-    assert.equal(await runPmCli({ argv: ["otp", "--quiet"], clients: { otp: { get } }, ...quiet }), CLI_EXIT.OK);
-    assert.equal(quiet.stdoutText(), "");
-    assert.match(quiet.stderrText(), /deprecated/u);
-  });
-
-  it("returns a successful empty OTP result unless --require-match is set", async () => {
-    const relaxed = createIo();
-    const required = createIo();
-    const get = mock.fn(async () => ({ success: false, error: "No matching Proton Mail message found" }));
-
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...relaxed }), CLI_EXIT.OK);
-    const relaxedEnvelope = JSON.parse(relaxed.stdoutText());
-    assert.equal(relaxedEnvelope.ok, true);
-    assert.equal(relaxedEnvelope.data.status, "no_match");
-    assert.equal(relaxedEnvelope.data.codeFound, false);
-    assert.equal(relaxedEnvelope.data.deprecation.deprecated, true);
-    assert.equal(relaxed.stderrText(), "");
-
-    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...required }), CLI_EXIT.USAGE);
-    const requiredEnvelope = JSON.parse(required.stderrText());
-    assert.equal(requiredEnvelope.ok, false);
-    assert.equal(requiredEnvelope.error.code, "NO_MATCH");
-    assert.equal(requiredEnvelope.error.details.status, "no_match");
-    assert.equal(required.stdoutText(), "");
-  });
-
-  it("classifies successful OTP responses without tokens as matched-without-token", async () => {
-    const relaxed = createIo();
-    const required = createIo();
-    const get = mock.fn(async () => ({ success: true, message: { subject: "Verify" } }));
-
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...relaxed }), CLI_EXIT.OK);
-    const relaxedEnvelope = JSON.parse(relaxed.stdoutText());
-    assert.equal(relaxedEnvelope.data.status, "matched_without_token");
-    assert.equal(relaxedEnvelope.data.codeFound, false);
-    assert.equal(relaxedEnvelope.data.linkFound, false);
-
-    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...required }), CLI_EXIT.USAGE);
-    const requiredEnvelope = JSON.parse(required.stderrText());
-    assert.equal(requiredEnvelope.error.code, "TOKEN_NOT_FOUND");
-    assert.equal(requiredEnvelope.error.details.status, "matched_without_token");
-  });
-
-  it("omits secret-bearing message bodies and debug details from OTP JSON", async () => {
-    const io = createIo();
-    const get = mock.fn(async () => ({
+    const action = mock.fn(async (options) => ({
       success: true,
-      code: "123456",
-      debugEvents: [{ message: "selector detail" }],
-      message: {
-        id: "msg1",
-        index: 0,
-        subject: "Verify account",
-        preview: "Your secret code is 123456",
-        bodyText: "Full private body with code 123456 and token abc",
-      },
+      source: "rest",
+      action: options.action,
+      affected: options.ids,
+      skipped: options.skipped,
+      failed: [],
     }));
 
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({
+      argv: ["mail", "label", "--label", "10", "msg1", "msg1", "msg2", "--json"],
+      clients: { mail: { action } },
+      ...io,
+    }), CLI_EXIT.OK);
 
+    const options = action.mock.calls[0].arguments[0];
+    assert.equal(options.action, "label");
+    assert.equal(options.labelId, "10");
+    assert.deepEqual(options.ids, ["msg1", "msg2"]);
+    assert.deepEqual(options.skipped, [{ id: "msg1", reason: "duplicate" }]);
     const envelope = JSON.parse(io.stdoutText());
-    assert.equal(envelope.data.code, "123456");
-    assert.deepEqual(envelope.data.message, {
-      id: "msg1",
-      index: 0,
-      subject: "Verify account",
-    });
-    assert.equal(JSON.stringify(envelope).includes("bodyText"), false);
-    assert.equal(JSON.stringify(envelope).includes("preview"), false);
-    assert.equal(JSON.stringify(envelope).includes("Full private body"), false);
-    assert.equal(JSON.stringify(envelope).includes("debugEvents"), false);
+    assert.equal(envelope.data.status, "applied");
+    assert.deepEqual(envelope.data.affected, ["msg1", "msg2"]);
+    assert.deepEqual(envelope.data.skipped, [{ id: "msg1", reason: "duplicate" }]);
   });
 
-  it("omits message bodies from relaxed OTP failure JSON", async () => {
-    const io = createIo();
-    const get = mock.fn(async () => ({
-      success: false,
-      error: "Matching email found, but no OTP code or link was present",
-      message: {
-        subject: "Verify account",
-        preview: "Private preview",
-        bodyText: "Private body",
-      },
+  it("requires confirmation or dry-run for selection-based mail actions", async () => {
+    const missing = createIo();
+    const dryRun = createIo();
+    const action = mock.fn(async (options) => ({
+      success: true,
+      source: "rest",
+      action: options.action,
+      dryRun: options.dryRun,
+      requested: 1,
+      affected: [],
+      skipped: [{ id: "msg1", reason: "dry_run" }],
+      failed: [],
     }));
 
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "--from-search", "--subject", "Invoice", "--json"], clients: { mail: { action } }, ...missing }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(missing.stderrText()).error.code, "CONFIRMATION_REQUIRED");
+
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "--from-search", "--subject", "Invoice", "--dry-run", "--json"], clients: { mail: { action } }, ...dryRun }), CLI_EXIT.OK);
+    const options = action.mock.calls[0].arguments[0];
+    assert.equal(options.fromSearch, true);
+    assert.equal(options.dryRun, true);
+    assert.deepEqual(options.metadataFilter, { Subject: "Invoice" });
+    assert.equal(JSON.parse(dryRun.stdoutText()).data.status, "dry_run");
+  });
+
+  it("reports partial mail action failures deterministically", async () => {
+    const io = createIo();
+    const action = mock.fn(async () => ({
+      success: false,
+      source: "rest",
+      action: "trash",
+      affected: ["msg1"],
+      skipped: [],
+      failed: [{ id: "msg2", code: "MAIL_ACTION_FAILED", message: "user@example.com password=abc" }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "trash", "msg1", "msg2", "--json"], clients: { mail: { action } }, ...io }), CLI_EXIT.OK);
     const envelopeText = io.stdoutText();
     const envelope = JSON.parse(envelopeText);
-    assert.equal(envelope.data.status, "matched_without_token");
-    assert.deepEqual(envelope.data.message, { subject: "Verify account" });
-    assert.equal(envelopeText.includes("Private"), false);
-    assert.equal(envelopeText.includes("bodyText"), false);
+    assert.equal(envelope.data.status, "partial_failure");
+    assert.deepEqual(envelope.data.affected, ["msg1"]);
+    assert.equal(envelope.data.failed[0].id, "msg2");
+    assert.equal(envelopeText.includes("user@example.com"), false);
+    assert.equal(envelopeText.includes("abc"), false);
   });
 
-  it("redacts secret details in OTP soft-failure JSON", async () => {
+
+  it("normalizes upstream partial mail action responses", async () => {
     const io = createIo();
-    const get = mock.fn(async () => ({
+    const action = mock.fn(async () => ({
       success: false,
-      error: "password=abc user@example.com",
-      lastError: "Bearer secret-token",
+      source: "rest",
+      action: "mark-read",
+      affected: ["msg1"],
+      failed: [{ id: "msg2", code: "2500", message: "Rejected" }],
     }));
 
-    assert.equal(await runPmCli({ argv: ["otp", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.OK);
-    const envelopeText = io.stdoutText();
-    assert.equal(envelopeText.includes("abc"), false);
-    assert.equal(envelopeText.includes("user@example.com"), false);
-    assert.equal(envelopeText.includes("secret-token"), false);
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "msg1", "msg2", "--json"], clients: { mail: { action } }, ...io }), CLI_EXIT.OK);
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.data.status, "partial_failure");
+    assert.deepEqual(envelope.data.affected, ["msg1"]);
+    assert.deepEqual(envelope.data.failed, [{ id: "msg2", code: "2500", message: "Rejected" }]);
   });
 
-  it("redacts secret details in OTP require-match failures", async () => {
-    const io = createIo();
-    const get = mock.fn(async () => ({
-      success: false,
-      error: "password=abc user@example.com",
-    }));
+  it("rejects unsafe mail action selections before dispatch", async () => {
+    const invalid = createIo();
+    const missingLabel = createIo();
+    const unsupportedMatch = createIo();
+    const action = mock.fn(async () => ({ affected: [] }));
 
-    assert.equal(await runPmCli({ argv: ["otp", "--require-match", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.USAGE);
-    const envelopeText = io.stderrText();
-    assert.equal(envelopeText.includes("abc"), false);
-    assert.equal(envelopeText.includes("user@example.com"), false);
-  });
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "browser:index:0", "--json"], clients: { mail: { action } }, ...invalid }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(invalid.stderrText()).error.code, "INVALID_MESSAGE_ID");
 
-  it("rejects invalid OTP flags before dispatch", async () => {
-    const invalidLimit = createIo();
-    const unknown = createIo();
-    const get = mock.fn(async () => ({ code: "123456" }));
+    assert.equal(await runPmCli({ argv: ["mail", "label", "msg1", "--json"], clients: { mail: { action } }, ...missingLabel }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(missingLabel.stderrText()).error.code, "MISSING_LABEL");
 
-    assert.equal(await runPmCli({ argv: ["otp", "--limit", "many", "--json"], clients: { otp: { get } }, ...invalidLimit }), CLI_EXIT.USAGE);
-    assert.equal(JSON.parse(invalidLimit.stderrText()).error.code, "INVALID_LIMIT");
-
-    const invalidPoll = createIo();
-    assert.equal(await runPmCli({ argv: ["otp", "--poll-interval", "0", "--json"], clients: { otp: { get } }, ...invalidPoll }), CLI_EXIT.USAGE);
-    assert.equal(JSON.parse(invalidPoll.stderrText()).error.code, "INVALID_POLL_INTERVAL");
-
-    assert.equal(await runPmCli({ argv: ["otp", "--unknown", "--json"], clients: { otp: { get } }, ...unknown }), CLI_EXIT.USAGE);
-    assert.equal(JSON.parse(unknown.stderrText()).error.code, "UNKNOWN_FLAG");
-    assert.equal(get.mock.callCount(), 0);
-  });
-
-  it("rejects missing OTP flag values before dispatch", async () => {
-    const io = createIo();
-    const get = mock.fn(async () => ({ code: "123456" }));
-
-    assert.equal(await runPmCli({ argv: ["otp", "--provider", "--unknown", "--json"], clients: { otp: { get } }, ...io }), CLI_EXIT.USAGE);
-    assert.equal(JSON.parse(io.stderrText()).error.code, "MISSING_FLAG_VALUE");
-    assert.equal(get.mock.callCount(), 0);
+    assert.equal(await runPmCli({ argv: ["mail", "trash", "--from-search", "--match", "github", "--dry-run", "--json"], clients: { mail: { action } }, ...unsupportedMatch }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(unsupportedMatch.stderrText()).error.code, "UNSUPPORTED_SEARCH_MATCH");
+    assert.equal(action.mock.callCount(), 0);
   });
 
   it("returns a contract stub error without live clients", async () => {
@@ -740,21 +632,16 @@ describe("pm CLI runner", () => {
 
   it("rejects unexpected positional arguments before dispatch", async () => {
     const listIo = createIo();
-    const otpIo = createIo();
     const readIo = createIo();
     const list = mock.fn(async () => ({ messages: [] }));
-    const get = mock.fn(async () => ({ code: "123456" }));
     const read = mock.fn(async () => ({ id: "msg1" }));
 
     assert.equal(await runPmCli({ argv: ["ls", "extra", "--json"], clients: { mail: { list } }, ...listIo }), CLI_EXIT.USAGE);
-    assert.equal(await runPmCli({ argv: ["otp", "extra", "--json"], clients: { otp: { get } }, ...otpIo }), CLI_EXIT.USAGE);
     assert.equal(await runPmCli({ argv: ["read", "msg1", "extra", "--json"], clients: { mail: { read } }, ...readIo }), CLI_EXIT.USAGE);
 
     assert.equal(JSON.parse(listIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
-    assert.equal(JSON.parse(otpIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
     assert.equal(JSON.parse(readIo.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
     assert.equal(list.mock.callCount(), 0);
-    assert.equal(get.mock.callCount(), 0);
     assert.equal(read.mock.callCount(), 0);
   });
 
