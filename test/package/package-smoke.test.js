@@ -20,7 +20,7 @@ describe("installed pm package smoke", () => {
 
     const pack = run("npm", ["pack", "--json", "--pack-destination", packDir], { cwd: ROOT });
     assert.equal(pack.status, 0, pack.stderr);
-    const [packed] = JSON.parse(pack.stdout);
+    const [packed] = JSON.parse(pack.stdout.slice(pack.stdout.indexOf("[")));
     assert.ok(packed.filename, "npm pack should return a tarball filename");
     const tarball = path.join(packDir, packed.filename);
     assert.equal(fs.existsSync(tarball), true, `missing packed tarball: ${tarball}`);
@@ -52,6 +52,32 @@ describe("installed pm package smoke", () => {
     assert.equal(importCheck.status, 0, importCheck.stderr);
     assert.equal(importCheck.stdout, "function:function:function:function\n");
     assert.equal(importCheck.stderr, "");
+
+    assert.equal(fs.existsSync(path.join(appDir, "node_modules", "proton-mail-cli", "dist", "index.d.ts")), true);
+    const typeCheckFile = path.join(appDir, "type-check.mts");
+    fs.writeFileSync(typeCheckFile, `
+      import { ProtonMailClient, ProtonMailBrowserClient, FileSessionStore, buildMailMetadataFilter } from "proton-mail-cli";
+
+      const client = new ProtonMailClient({ sessionStore: { getCookieHeader: async () => "", getUIDCandidates: async () => [] } });
+      const browser = new ProtonMailBrowserClient({ headless: true });
+      const store = new FileSessionStore("session.json");
+      buildMailMetadataFilter({ subject: "Invoice" });
+      void client;
+      void browser;
+      void store;
+    `);
+    const tsc = path.join(ROOT, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+    const typeCheck = run(tsc, [
+      "--noEmit",
+      "--module", "Node16",
+      "--moduleResolution", "Node16",
+      "--target", "ES2022",
+      "--strict",
+      "--skipLibCheck",
+      "--typeRoots", path.join(ROOT, "node_modules", "@types"),
+      typeCheckFile,
+    ], { cwd: appDir, env });
+    assert.equal(typeCheck.status, 0, typeCheck.stderr || typeCheck.stdout);
 
     const failure = run(pm, ["read", "msg1", "--json"], { cwd: appDir, env });
     assert.equal(failure.status, 1, failure.stderr);

@@ -9,6 +9,7 @@
   "type": "module",
   "files": [
     "bin/",
+    "dist/",
     "examples/",
     "src/",
     "scripts/",
@@ -18,10 +19,15 @@
     "CHANGELOG.md",
     "docs/"
   ],
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "scripts": {
+    "build:types": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.types.json",
     "ci:offline": "pnpm typecheck && pnpm test:unit && pnpm test:package && npm pack --dry-run",
     "release:dry-run": "semantic-release --dry-run --no-ci",
     "test": "pnpm test:unit",
@@ -29,6 +35,7 @@
     "test:package": "node --test \"test/package/*.test.js\"",
     "test:live": "PROTONMAIL_LIVE_TEST=1 node --test \"test/live/**/*.test.js\"",
     "typecheck": "tsc --noEmit",
+    "prepack": "pnpm build:types",
     "env:check": "node scripts/check-env-docs.mjs",
     "debug:login": "node scripts/debug-login.mjs",
     "login:probe": "node scripts/probe-login-state.mjs",
