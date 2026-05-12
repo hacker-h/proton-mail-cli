@@ -89,7 +89,6 @@ jobs:
 
       - name: Decide trusted secret policy
         id: secret-policy
-        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
@@ -98,39 +97,7 @@ jobs:
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
           PR_USER: ${{ github.event.pull_request.user.login || '' }}
           DISPATCH_ALLOW_FRESH_LOGIN: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_fresh_login && '1' || '0' }}
-        run: |
-          set -euo pipefail
-
-          trusted=0
-          case "${EVENT_NAME}" in
-            push|workflow_dispatch)
-              if [[ "${ACTOR}" == "${REPOSITORY_OWNER}" ]]; then
-                trusted=1
-              fi
-              ;;
-            pull_request)
-              if [[ "${PR_HEAD_REPO}" == "${REPOSITORY}" ]] && \
-                { [[ "${ACTOR}" == "${REPOSITORY_OWNER}" ]] || \
-                  [[ "${ACTOR}" == "dependabot[bot]" ]] || \
-                  [[ "${PR_USER}" == "${REPOSITORY_OWNER}" ]] || \
-                  [[ "${PR_USER}" == "dependabot[bot]" ]]; }; then
-                trusted=1
-              fi
-              ;;
-          esac
-
-          allow_fresh_login=0
-          if [[ "${trusted}" == "1" ]]; then
-            allow_fresh_login=1
-          fi
-          if [[ "${EVENT_NAME}" == "workflow_dispatch" && \
-            "${DISPATCH_ALLOW_FRESH_LOGIN}" == "1" && \
-            "${ACTOR}" == "${REPOSITORY_OWNER}" ]]; then
-            allow_fresh_login=1
-          fi
-
-          printf 'trusted=%s\n' "${trusted}" >> "${GITHUB_OUTPUT}"
-          printf 'allow_fresh_login=%s\n' "${allow_fresh_login}" >> "${GITHUB_OUTPUT}"
+        run: node scripts/live-secret-policy.mjs >> "${GITHUB_OUTPUT}"
 
       - name: Restore encrypted branch session cache
         id: restore-session
@@ -138,6 +105,8 @@ jobs:
         with:
           path: .ci-proton/session.enc
           key: proton-session-${{ steps.session-key.outputs.branch }}-${{ steps.session-key.outputs.bucket }}
+          restore-keys: |
+            proton-session-${{ steps.session-key.outputs.branch }}-
 
       - name: Prepare live session
         shell: bash
@@ -168,8 +137,8 @@ jobs:
             exit 0
           fi
 
-          echo "Missing branch session cache and PROTONMAIL_SESSION_JSON. PR/scheduled CI requires a cached or seeded keep-logged-in session." >&2
-          exit 1
+            echo "Missing branch session cache and PROTONMAIL_SESSION_JSON, and this event is not allowed to use Proton credentials." >&2
+            exit 1
 
       - name: Verify live credentials are configured
         shell: bash
@@ -186,8 +155,7 @@ jobs:
             exit 0
           fi
           if [[ "${PROTONMAIL_ALLOW_FRESH_LOGIN}" != "1" ]]; then
-            echo "Missing PROTONMAIL_SESSION_JSON. Scheduled CI intentionally avoids fresh Proton credential login." >&2
-            echo "Capture a keep-logged-in session and store it as PROTONMAIL_SESSION_JSON, or manually dispatch with allow_fresh_login=true." >&2
+            echo "Missing PROTONMAIL_SESSION_JSON and this event is not allowed to use Proton credentials." >&2
             exit 1
           fi
           if [[ -z "${PROTONMAIL_USERNAME}" || -z "${PROTONMAIL_PASSWORD}" ]]; then
@@ -195,7 +163,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run live Proton login regression
+      - name: Verify saved session or refresh with live credentials
         env:
           PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
