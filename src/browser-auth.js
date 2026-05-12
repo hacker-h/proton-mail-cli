@@ -7,6 +7,7 @@ import {
   hasInboxIndicators,
   locateLoginEmailField,
   locateLoginPasswordField,
+  locateProtonHomeLoginTarget,
   locateSignInButton,
   locateStaySignedInCheckbox,
   waitForInboxOrLogin,
@@ -15,6 +16,7 @@ import { clearCooldown, resultWithError, saveSession, writeCooldown } from "./br
 import { delay } from "./browser-utils.js";
 
 const MAIL_HOME_URL = "https://mail.proton.me";
+const PROTON_MAIL_MARKETING_URL = "https://proton.me/mail";
 
 /**
  * @typedef {import("playwright-core").Page} Page
@@ -113,6 +115,59 @@ export async function performLogin({ page, context, username, password, sessionF
   }
   recordDebugEvent(page, "auth.login.timeout", { timeoutMs: 30000 });
   return resultWithError("Automatic login timed out", { manualRequired: true, debugEvents: getDebugEvents(page) });
+}
+
+/**
+ * @param {{
+ *   page: Page,
+ *   context: BrowserContext,
+ *   sessionFile: string,
+ *   mailUrl: string,
+ *   navigateToInbox: (page: Page, url?: string) => Promise<NavigationResult>
+ * }} input
+ * @returns {Promise<BrowserAuthResult>}
+ */
+export async function refreshSessionThroughSso({ page, context, sessionFile, mailUrl, navigateToInbox }) {
+  await page.goto(PROTON_MAIL_MARKETING_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+  let state = await waitForInboxOrLogin(page, 3000);
+  if (state.state === "inbox") {
+    return saveSsoSession({ page, context, sessionFile, mailUrl, navigateToInbox });
+  }
+
+  const loginTarget = await locateProtonHomeLoginTarget(page, 5000);
+  if (!loginTarget) {
+    return { success: false, loginMethod: "sso", ssoRefresh: false, ssoState: state.state, debugEvents: getDebugEvents(page) };
+  }
+
+  await loginTarget.click({ timeout: 5000 });
+  state = await waitForInboxOrLogin(page, 15000);
+  if (state.state === "inbox") {
+    return saveSsoSession({ page, context, sessionFile, mailUrl, navigateToInbox });
+  }
+
+  return { success: false, loginMethod: "sso", ssoRefresh: false, ssoState: state.state, debugEvents: getDebugEvents(page) };
+}
+
+/**
+ * @param {{
+ *   page: Page,
+ *   context: BrowserContext,
+ *   sessionFile: string,
+ *   mailUrl: string,
+ *   navigateToInbox: (page: Page, url?: string) => Promise<NavigationResult>
+ * }} input
+ * @returns {Promise<BrowserAuthResult>}
+ */
+async function saveSsoSession({ page, context, sessionFile, mailUrl, navigateToInbox }) {
+  const navigation = await navigateToInbox(page, mailUrl);
+  if (navigation.state !== "inbox") {
+    return resultWithError("SSO session refresh completed but target mail folder was not reachable", { manualRequired: true, debugEvents: getDebugEvents(page) });
+  }
+  await dismissModals(page);
+  await saveSession(context, sessionFile);
+  clearCooldown(sessionFile);
+  return { success: true, loginMethod: "sso", ssoRefresh: true, sessionValid: true };
 }
 
 /**

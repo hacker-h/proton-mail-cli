@@ -1,6 +1,6 @@
 import path from "node:path";
 import { chromium } from "playwright-core";
-import { performLogin, waitForManualLoginCompletion } from "./browser-auth.js";
+import { performLogin, refreshSessionThroughSso, waitForManualLoginCompletion } from "./browser-auth.js";
 import { debugLog, getDebugEvents, ignoreWithDebug, isDebugLoggingEnabled } from "./browser-debug.js";
 import {
   findMatchingMessage,
@@ -184,6 +184,19 @@ export class ProtonMailBrowserClient {
           sessionValid: true,
           sessionFileExists: storage.exists,
         }, { browser, context, page, debug });
+      }
+
+      if (storage.exists) {
+        const sso = await refreshSessionThroughSso({
+          page,
+          context,
+          sessionFile: this.#options.sessionFile,
+          mailUrl,
+          navigateToInbox,
+        });
+        if (sso.success) {
+          return resultWithSession(sso, { browser, context, page, debug });
+        }
       }
 
       if (!credentials.ready) {
@@ -375,6 +388,19 @@ export class ProtonMailBrowserClient {
       let navigation = await navigateToInbox(page, mailUrl);
       if (navigation.state === "inbox") {
         return resultWithSession({ success: true }, { browser, context, page, debug });
+      }
+
+      if (storage.exists) {
+        const sso = await refreshSessionThroughSso({
+          page,
+          context,
+          sessionFile: this.#options.sessionFile,
+          mailUrl,
+          navigateToInbox,
+        });
+        if (sso.success) {
+          return resultWithSession({ success: true, loginMethod: sso.loginMethod, ssoRefresh: true }, { browser, context, page, debug });
+        }
       }
 
       if (isExpiredSavedSession(storage, navigation)) {

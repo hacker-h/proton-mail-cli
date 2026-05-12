@@ -149,6 +149,28 @@ export async function locateSignInButton(page, timeout = 10000) {
 
 /**
  * @param {Page} page
+ * @param {number} [timeout]
+ * @returns {Promise<Locator | null>}
+ */
+export async function locateProtonHomeLoginTarget(page, timeout = 5000) {
+  return firstVisibleCandidate(page, "protonHomeLogin", [
+    {
+      description: { role: "link", name: "/sign in|log in|login|anmelden/i" },
+      locator: page.getByRole("link", { name: /sign in|log in|login|anmelden/i }).first(),
+    },
+    {
+      description: { role: "button", name: "/sign in|log in|login|anmelden/i" },
+      locator: page.getByRole("button", { name: /sign in|log in|login|anmelden/i }).first(),
+    },
+    {
+      description: { selector: 'a[href*="account.proton.me"], a[href*="/login"], a:has-text("Sign in"), a:has-text("Log in"), button:has-text("Sign in"), button:has-text("Log in")' },
+      locator: page.locator('a[href*="account.proton.me"], a[href*="/login"], a:has-text("Sign in"), a:has-text("Log in"), button:has-text("Sign in"), button:has-text("Log in")').first(),
+    },
+  ], timeout);
+}
+
+/**
+ * @param {Page} page
  * @returns {Promise<Locator | null>}
  */
 export async function locateStaySignedInCheckbox(page) {
