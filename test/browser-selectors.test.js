@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { getDebugEvents } from "../src/browser-debug.js";
 import { scanInbox } from "../src/browser-messages.js";
-import { locateLoginEmailField, locateSignInButton } from "../src/browser-selectors.js";
+import { locateLoginEmailField, locateProtonHomeLoginTarget, locateSignInButton } from "../src/browser-selectors.js";
 
 function fakeLocator({ visible = false, label = "locator", errorMessage = "not visible" } = {}) {
   return {
@@ -67,6 +67,25 @@ describe("browser selector contracts", () => {
     assert.equal(notFound.details.attempts.length, 2);
     assert.equal(notFound.details.attempts.some((attempt) => attempt.role === "button"), true);
     assert.equal(notFound.details.attempts.some((attempt) => attempt.selector?.includes("button")), true);
+  });
+
+  it("locates Proton home login targets before credential fields", async () => {
+    const fallback = fakeLocator({ visible: true, label: "home-login" });
+    const page = fakePage({
+      roleLocators: {
+        link: fakeLocator(),
+        button: fakeLocator(),
+      },
+      selectorLocators: {
+        'a[href*="account.proton.me"], a[href*="/login"], a:has-text("Sign in"), a:has-text("Log in"), button:has-text("Sign in"), button:has-text("Log in")': fallback,
+      },
+    });
+
+    const target = await locateProtonHomeLoginTarget(page, 10);
+
+    assert.equal(target, fallback);
+    const events = getDebugEvents(page);
+    assert.equal(events.some((event) => event.type === "selector.match" && event.details.area === "protonHomeLogin"), true);
   });
 
   it("extracts message previews when the loaded marker selector drifts", async () => {

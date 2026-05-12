@@ -41,6 +41,8 @@ Optional methods:
 
 Proton browser sessions are server-controlled. A captured Playwright storage-state file should be treated as a renewable credential, not a permanent login.
 
+Proton documents persistent sessions for accounts signed in with "Keep me signed in" and says sessions expire after 60 days of inactivity unless explicitly logged out. In practice, a saved browser state can still stop working earlier in CI if Proton rejects that copied state for the runner environment.
+
 Typical expiry triggers:
 
 - inactivity or normal Proton session TTL enforcement
@@ -48,11 +50,11 @@ Typical expiry triggers:
 - risk changes such as a new runner IP, datacenter, user agent, or suspicious repeated fresh-login attempts
 - browser storage-state truncation, secret corruption, or a session file restored from an old cache bucket
 
-There is no stable public Proton TTL guarantee. In CI, keep reuse windows short; this repository's live workflow uses a six-hour cache bucket and falls back to a repository session secret when a branch bucket misses. For unattended jobs, refresh before each scheduled batch or at least before the current cache bucket closes.
+There is no stable public Proton cookie-level TTL guarantee. In CI, keep reuse windows short; this repository's live workflow uses a six-hour primary cache bucket, restores the newest cache for the same branch when the exact bucket misses, falls back to a repository session secret, then falls back to credential login in trusted contexts.
 
 ### Browser Expiry Signal
 
-`ProtonMailBrowserClient` detects saved-session expiry when a stored session file is loaded, Proton redirects the mailbox navigation back to the login page, and no inbox indicators are visible.
+`ProtonMailBrowserClient` first tries direct mailbox navigation with the stored session. If that fails, it opens Proton Mail's public landing page and clicks the login/sign-in target so Proton's SSO session picker can auto-forward an already-active account. It only reports saved-session expiry when those session paths fail and Proton still redirects the mailbox navigation back to the login page.
 
 Browser read methods such as `getInboxMessages()` and `getLatestMessage()` return a structured failure:
 
