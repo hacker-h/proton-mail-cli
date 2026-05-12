@@ -56,9 +56,9 @@ The live test verifies:
 - session file creation
 - saved-session reuse without re-entering credentials
 
-If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. This is the preferred and expected scheduled-CI mode because fresh credential login may trigger Proton CAPTCHA, 2FA/TOTP, or other risk checks.
+If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
 
-Trusted owner and Dependabot runs may perform fresh username/password login when the seeded or cached session is missing or expired. Scheduled CI intentionally stays session-only. Fresh login should still be treated as potentially causing Proton risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
+Trusted owner, Dependabot, and scheduled runs may perform fresh username/password login when the seeded or cached session is missing or expired. Fresh login should still be treated as potentially causing Proton CAPTCHA, 2FA/TOTP, or other risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
 
 ## Pull Request Live Login Cache
 
@@ -68,13 +68,14 @@ To avoid repeatedly logging in to Proton, the workflow restores an encrypted ses
 
 Cache behavior:
 
-- cache key: branch slug + six-hour bucket
+- primary cache key: branch slug + six-hour bucket
+- restore fallback: newest encrypted session cache for the same branch slug
 - cache contents: encrypted minimized Playwright storage state
 - encryption: AES-256-GCM via `PROTONMAIL_SESSION_CACHE_KEY`
 - fallback: `PROTONMAIL_SESSION_JSON` when no cache exists for the current branch/bucket
-- fresh password login: enabled only for owner-launched runs, owner same-repository PRs, and Dependabot PRs
+- fresh password login: enabled for trusted owner-launched runs, scheduled runs, owner same-repository PRs, and Dependabot PRs
 
-The cache is intentionally short-lived. New branch buckets fall back to the repository session secret, then save a refreshed encrypted session for later runs in the same six-hour window.
+The exact cache bucket is intentionally short-lived, but the restore fallback lets scheduled CI try the newest encrypted session for the same branch before falling back to repository secrets or username/password refresh. Successful runs save a refreshed encrypted session for the current six-hour bucket.
 
 Do not cache raw session JSON. The workflow only caches `.ci-proton/session.enc`.
 
@@ -82,13 +83,15 @@ Dependabot live-login coverage uses Dependabot-scoped secrets with the same name
 
 ## Proactive Session Refresh
 
-For scheduled CI, refresh session state before jobs depend on it rather than waiting for a bot run to discover expiry.
+For scheduled CI, the `Proton login and session reuse` job is the session health check. It restores the encrypted branch cache or seeds `PROTONMAIL_SESSION_JSON`, verifies that saved browser state reaches Proton Mail directly or through Proton's login/SSO forward path, and automatically performs username/password login with the dedicated test account if the saved session no longer works.
 
-Recommended cadence:
+Expected scheduled behavior:
 
-- run a scheduled refresh inside each six-hour cache bucket, or immediately before the live workflow batch
 - use the dedicated Proton test account only
-- write the refreshed Playwright storage state to a temporary file, then update `PROTONMAIL_SESSION_JSON`
+- try saved browser state first
+- try Proton's login/SSO forward path before filling credentials
+- fall back to `PROTONMAIL_USERNAME`/`PROTONMAIL_PASSWORD` only in trusted contexts
+- write refreshed Playwright storage state to the encrypted six-hour Actions cache
 - never print the session JSON, cookies, refresh payloads, or full account address
 
 Local refresh recipe:
@@ -125,7 +128,7 @@ pnpm debug:login -- --profile-dir data/debug-profile --timeout 1800
 pnpm session:secret -- --repo <owner>/<repo> --session-file data/protonmail-auth.json
 ```
 
-GitHub Actions schedule sketch:
+Optional GitHub Actions secret-rotation sketch:
 
 ```yaml
 on:

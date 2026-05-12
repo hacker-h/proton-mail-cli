@@ -12,6 +12,7 @@ const hasCredentials = Boolean(process.env.PROTONMAIL_USERNAME && process.env.PR
 const freshLoginAllowed = process.env.PROTONMAIL_ALLOW_FRESH_LOGIN === "1";
 const shouldRun = liveEnabled && (hasSeededSession || hasConfiguredSessionFile || (hasCredentials && freshLoginAllowed));
 const testOptions = shouldRun ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 with PROTONMAIL_SESSION_JSON, or explicitly allow fresh login with credentials" };
+const pureLoginOptions = liveEnabled && hasCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with credentials" };
 
 let tmpDir = "";
 
@@ -71,6 +72,34 @@ describe("live Proton login", testOptions, () => {
     assert.equal(reuse.success, true, formatLiveFailure(reuse));
     assert.equal(reuse.sessionValid, true);
     assert.equal(reuse.loginMethod, "session");
+  });
+
+  it("logs in from scratch with username and password", pureLoginOptions, async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-live-pure-login-"));
+    const sessionFile = path.join(tmpDir, "session.json");
+    const headless = process.env.PROTONMAIL_LIVE_HEADLESS !== "0";
+
+    const client = new ProtonMailBrowserClient({
+      headless,
+      sessionFile,
+      timeoutSeconds: 120,
+      manualLoginTimeoutSeconds: 120,
+    });
+
+    const login = await client.loginAndSaveSession({
+      headless,
+      manualFallback: false,
+      timeoutSeconds: 120,
+    });
+
+    assert.equal(login.success, true, formatLiveFailure(login));
+    assert.equal(login.sessionValid, true);
+    assert.notEqual(login.loginMethod, "session", "Pure login must not pass only by reusing a saved session");
+    assert.equal(fs.existsSync(sessionFile), true);
+
+    const savedSession = JSON.parse(fs.readFileSync(sessionFile, "utf8"));
+    assert.ok(Array.isArray(savedSession.cookies));
+    assert.ok(savedSession.cookies.length > 0);
   });
 });
 
