@@ -1,3 +1,15 @@
+# [2.1.0](https://github.com/hacker-h/proton-mail-cli/compare/v2.0.0...v2.1.0) (2026-05-12)
+
+
+### Bug Fixes
+
+* **tools:** satisfy tool typecheck ([7240c5a](https://github.com/hacker-h/proton-mail-cli/commit/7240c5aacde95ff32dec4f285e159e2d5450ef3e))
+
+
+### Features
+
+* **browser:** add Proton SSO session refresh ([e31de45](https://github.com/hacker-h/proton-mail-cli/commit/e31de45c82398643da2100408642a9db80220548))
+
 # [2.0.0](https://github.com/hacker-h/proton-mail-cli/compare/v1.12.0...v2.0.0) (2026-05-11)
 
 
