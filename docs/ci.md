@@ -41,6 +41,8 @@ Fallback repository secrets for trusted fresh-login runs:
 
 - `PROTONMAIL_USERNAME`
 - `PROTONMAIL_PASSWORD`
+- `PROTONMAIL_USERNAME2`
+- `PROTONMAIL_PASSWORD2`
 
 Local equivalent:
 
@@ -55,6 +57,7 @@ The live test verifies:
 - automatic Proton Mail login with the browser backend
 - session file creation
 - saved-session reuse without re-entering credentials
+- secondary test-account login when trusted fresh-login secrets are available
 
 If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
 
