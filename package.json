@@ -30,6 +30,7 @@
     "build:types": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.types.json",
     "ci:offline": "pnpm typecheck && pnpm test:unit && pnpm test:package && npm pack --dry-run",
     "release:dry-run": "semantic-release --dry-run --no-ci",
+    "release:asset-smoke": "node scripts/release-asset-smoke.mjs",
     "test": "pnpm test:unit",
     "test:unit": "node --test \"test/*.test.js\"",
     "test:package": "node --test \"test/package/*.test.js\"",
