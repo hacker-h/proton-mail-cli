@@ -4,6 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { chromium } from "playwright-core";
+import { performLogin } from "../../src/browser-auth.js";
+import { navigateToInbox } from "../../src/browser-client.js";
+import { dismissModals } from "../../src/browser-selectors.js";
 import { FileSessionStore, ProtonMailBrowserClient, ProtonMailClient } from "../../src/index.js";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -18,6 +22,7 @@ export const hasRestSession = liveEnabled && Boolean(process.env.PROTONMAIL_REST
 export const browserTestOptions = hasBrowserAuth ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 with PROTONMAIL_SESSION_JSON, PROTONMAIL_LIVE_SESSION_FILE, or explicit fresh-login credentials" };
 export const pureLoginTestOptions = liveEnabled && hasCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with credentials" };
 export const secondaryLoginTestOptions = liveEnabled && hasSecondaryCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with PROTONMAIL_USERNAME2/PROTONMAIL_PASSWORD2" };
+export const twoAccountTestOptions = liveEnabled && hasCredentials && hasSecondaryCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1, PROTONMAIL_ALLOW_FRESH_LOGIN=1, and both Proton test accounts" };
 export const restTestOptions = hasRestSession ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_REST_SESSION_FILE for REST-backed live tests" };
 
 export function makeLivePrefix(scope = "live") {
@@ -67,6 +72,84 @@ export function createBrowserClient(sessionFile, options = {}) {
     manualLoginTimeoutSeconds: 120,
     ...options,
   });
+}
+
+export async function openLiveInboxPage({ sessionFile, usernameEnv = "PROTONMAIL_USERNAME", passwordEnv = "PROTONMAIL_PASSWORD" } = {}) {
+  const headless = process.env.PROTONMAIL_LIVE_HEADLESS !== "0";
+  const browser = await chromium.launch({ headless, args: ["--disable-blink-features=AutomationControlled"] });
+  const storageState = sessionFile && fs.existsSync(sessionFile) ? sessionFile : undefined;
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 900 },
+    storageState,
+  });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { configurable: true, get: () => undefined });
+  });
+  const page = await context.newPage();
+  let navigation = await navigateToInbox(page);
+  if (navigation.state !== "inbox") {
+    const login = await performLogin({
+      page,
+      context,
+      username: process.env[usernameEnv] || "",
+      password: process.env[passwordEnv] || "",
+      sessionFile: sessionFile || path.join(os.tmpdir(), `protonmail-live-${usernameEnv}.json`),
+    });
+    assert.equal(login.success, true, formatLiveFailure(login));
+    navigation = await navigateToInbox(page);
+  }
+  assert.equal(navigation.state, "inbox", redact(JSON.stringify(navigation)));
+  await dismissModals(page);
+  return { browser, context, page };
+}
+
+export async function closeLivePage(runtime) {
+  await runtime?.context?.close().catch(() => {});
+  await runtime?.browser?.close().catch(() => {});
+}
+
+export async function sendBrowserMessage(page, { to = [], cc = [], bcc = [], subject, body }) {
+  assert.ok(to.length > 0, "at least one To recipient is required");
+  await dismissModals(page);
+  await page.locator('[data-testid="sidebar:compose"]').click({ force: true, timeout: 30000 });
+  await page.locator('[data-testid="composer:to"]').waitFor({ state: "visible", timeout: 15000 });
+
+  for (const address of to) await fillRecipient(page, "composer:to", address);
+  if (cc.length > 0) {
+    await page.locator('[data-testid="composer:recipients:cc-button"]').click();
+    for (const address of cc) await fillRecipient(page, "composer:to-cc", address);
+  }
+  if (bcc.length > 0) {
+    await page.locator('[data-testid="composer:recipients:bcc-button"]').click();
+    for (const address of bcc) await fillRecipient(page, "composer:to-bcc", address);
+  }
+
+  await page.locator('[data-testid="composer:subject"]').fill(subject);
+  await fillComposerBody(page, body);
+  const sendButton = page.locator('[data-testid="composer:send-button"]');
+  await sendButton.click({ timeout: 15000 });
+  try {
+    await sendButton.waitFor({ state: "detached", timeout: 45000 });
+  } catch (error) {
+    const composerText = await page.locator('[data-testid^="composer:"]').evaluateAll((nodes) => nodes.map((node) => node.textContent || "").join(" ")).catch(() => "");
+    const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
+    assert.fail(redact(`Proton send did not complete: ${error instanceof Error ? error.message : String(error)} ${composerText} ${alerts.join(" ")}`));
+  }
+}
+
+export async function pollBrowserMessage({ sessionFile, usernameEnv, passwordEnv, subject, bodyText, timeoutMs = 120_000 }) {
+  const startedAt = Date.now();
+  let lastError = "";
+  while (Date.now() - startedAt < timeoutMs) {
+    const client = createBrowserClient(sessionFile, { usernameEnv, passwordEnv });
+    const result = await client.getLatestMessage({ matchText: subject, timeoutSeconds: 20 });
+    const subjectMatched = result.message?.subject === subject || String(result.message?.preview || "").includes(subject);
+    if (result.success && subjectMatched && result.message?.bodyText?.includes(bodyText)) return result.message;
+    lastError = String(result.error || "message not found yet");
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+  assert.fail(`Timed out waiting for ${redact(subject)}: ${redact(lastError)}`);
 }
 
 export async function loginAndAssertSession(client) {
@@ -125,6 +208,23 @@ export function redact(value) {
   return String(value)
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu, "[email]")
     .replace(/("?\b(?:password|token|cookie|session|authorization)\b"?\s*[:=]\s*)("?)[^,"}\s]+\2/giu, "$1$2[redacted]$2");
+}
+
+async function fillRecipient(page, testId, address) {
+  const locator = page.locator(`[data-testid="${testId}"]`).last();
+  await locator.fill(address);
+  await locator.press("Enter");
+}
+
+async function fillComposerBody(page, body) {
+  for (const frame of page.frames().reverse()) {
+    const text = await frame.locator("body").innerText({ timeout: 1000 }).catch(() => "");
+    if (!text.includes("Gesendet mit Proton Mail") && !text.includes("Sent with Proton Mail")) continue;
+    await frame.locator("body").click({ timeout: 5000 });
+    await frame.locator("body").pressSequentially(body, { delay: 1 });
+    return;
+  }
+  throw new Error("Composer body frame was not found");
 }
 
 function classifyFailure(result) {
