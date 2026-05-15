@@ -26,6 +26,18 @@ This repository currently has no release tags. The first semantic-release run on
 
 semantic-release updates `package.json` in the release job workspace before packing. The release commit stores the changelog and package version in git, while the git tag and GitHub Release remain the source of truth for the published artifact.
 
+## Release Asset Smoke
+
+`.github/workflows/release-asset-smoke.yml` verifies the uploaded GitHub Release tarball, not a local workspace pack. It runs automatically when a release is published and can also be run manually from GitHub Actions with an explicit tag or with the latest release.
+
+Manual local equivalent:
+
+```bash
+GH_TOKEN="$(gh auth token)" pnpm release:asset-smoke -- --tag v2.0.0
+```
+
+Omit `--tag` to verify the latest GitHub Release. The smoke downloads `proton-mail-cli-*.tgz` from GitHub Releases, installs it into a clean temporary app, checks `node_modules/.bin/pm --help`, `pm --version`, a JSON failure envelope, and package exports. It does not use Proton credentials and does not run live Proton tests.
+
 If this package should be published to npm later:
 
 1. Remove `"private": true` from `package.json`.

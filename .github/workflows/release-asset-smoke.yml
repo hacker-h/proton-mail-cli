@@ -1,0 +1,38 @@
+name: Release Asset Smoke
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "GitHub Release tag to verify. Leave empty for latest."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release-asset-smoke:
+    name: Downloaded release tarball smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Verify release tarball asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || 'latest' }}
+        run: node scripts/release-asset-smoke.mjs --tag "${RELEASE_TAG}"
