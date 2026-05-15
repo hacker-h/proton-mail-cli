@@ -95,7 +95,6 @@ export async function openLiveInboxPage({ sessionFile, usernameEnv = "PROTONMAIL
       username: process.env[usernameEnv] || "",
       password: process.env[passwordEnv] || "",
       sessionFile: sessionFile || path.join(os.tmpdir(), `protonmail-live-${usernameEnv}.json`),
-      suppressCooldown: true,
     });
     assert.equal(login.success, true, formatLiveFailure(login));
     navigation = await navigateToInbox(page);
@@ -128,10 +127,15 @@ export async function sendBrowserMessage(page, { to = [], cc = [], bcc = [], sub
 
   await page.locator('[data-testid="composer:subject"]').fill(subject);
   await fillComposerBody(page, body);
-  await page.locator('[data-testid="composer:send-button"]').click({ timeout: 15000 });
-  await page.locator('[data-testid="composer:send-button"]').waitFor({ state: "detached", timeout: 45000 }).catch(async () => {
-    await page.waitForTimeout(5000);
-  });
+  const sendButton = page.locator('[data-testid="composer:send-button"]');
+  await sendButton.click({ timeout: 15000 });
+  try {
+    await sendButton.waitFor({ state: "detached", timeout: 45000 });
+  } catch (error) {
+    const composerText = await page.locator('[data-testid^="composer:"]').evaluateAll((nodes) => nodes.map((node) => node.textContent || "").join(" ")).catch(() => "");
+    const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
+    assert.fail(redact(`Proton send did not complete: ${error instanceof Error ? error.message : String(error)} ${composerText} ${alerts.join(" ")}`));
+  }
 }
 
 export async function pollBrowserMessage({ sessionFile, usernameEnv, passwordEnv, subject, bodyText, timeoutMs = 120_000 }) {
@@ -139,7 +143,7 @@ export async function pollBrowserMessage({ sessionFile, usernameEnv, passwordEnv
   let lastError = "";
   while (Date.now() - startedAt < timeoutMs) {
     const client = createBrowserClient(sessionFile, { usernameEnv, passwordEnv });
-    const result = await client.getLatestMessage({ matchText: subject, timeoutSeconds: 120 });
+    const result = await client.getLatestMessage({ matchText: subject, timeoutSeconds: 20 });
     const subjectMatched = result.message?.subject === subject || String(result.message?.preview || "").includes(subject);
     if (result.success && subjectMatched && result.message?.bodyText?.includes(bodyText)) return result.message;
     lastError = String(result.error || "message not found yet");
@@ -203,7 +207,7 @@ export function formatLiveFailure(result) {
 export function redact(value) {
   return String(value)
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu, "[email]")
-    .replace(/\b(password|token|cookie|session|authorization)\b\s*[:=]\s*([^,}\s]+)/giu, "$1=[redacted]");
+    .replace(/("?\b(?:password|token|cookie|session|authorization)\b"?\s*[:=]\s*)("?)[^,"}\s]+\2/giu, "$1$2[redacted]$2");
 }
 
 async function fillRecipient(page, testId, address) {
