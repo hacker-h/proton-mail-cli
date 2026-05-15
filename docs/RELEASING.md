@@ -28,7 +28,7 @@ semantic-release updates `package.json` in the release job workspace before pack
 
 ## Release Asset Smoke
 
-`.github/workflows/release-asset-smoke.yml` verifies the uploaded GitHub Release tarball, not a local workspace pack. It runs automatically when a release is published and can also be run manually from GitHub Actions with an explicit tag or with the latest release.
+`.github/workflows/release-asset-smoke.yml` verifies the uploaded GitHub Release tarball and `SHA256SUMS`, not a local workspace pack. It runs automatically when a release is published and can also be run manually from GitHub Actions with an explicit tag or with the latest release.
 
 Manual local equivalent:
 
@@ -37,6 +37,8 @@ GH_TOKEN="$(gh auth token)" pnpm release:asset-smoke -- --tag v2.0.0
 ```
 
 Omit `--tag` to verify the latest GitHub Release. The smoke downloads `proton-mail-cli-*.tgz` from GitHub Releases, installs it into a clean temporary app, checks `node_modules/.bin/pm --help`, `pm --version`, a JSON failure envelope, and package exports. It does not use Proton credentials and does not run live Proton tests.
+
+Releases publish a `SHA256SUMS` asset alongside the package tarball. The release asset smoke verifies that file before installing the tarball. Older releases that predate `SHA256SUMS` can be checked with `pnpm release:asset-smoke -- --tag <tag> --allow-missing-checksums`, but installer and update flows must not use that legacy bypass: they must fail before installing or executing downloaded content if `SHA256SUMS` is missing, if the tarball is not listed, or if the SHA-256 digest does not match.
 
 If this package should be published to npm later:
 

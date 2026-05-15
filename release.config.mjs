@@ -17,6 +17,12 @@ export default {
       },
     ],
     [
+      "./scripts/semantic-release-checksums.mjs",
+      {
+        directory: "release",
+      },
+    ],
+    [
       "@semantic-release/git",
       {
         assets: ["CHANGELOG.md", "package.json"],
@@ -30,6 +36,10 @@ export default {
           {
             path: "release/*.tgz",
             label: "npm package tarball",
+          },
+          {
+            path: "release/SHA256SUMS",
+            label: "SHA-256 checksums",
           },
         ],
       },
