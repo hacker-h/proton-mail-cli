@@ -40,6 +40,10 @@ Omit `--tag` to verify the latest GitHub Release. The smoke downloads `proton-ma
 
 Releases publish a `SHA256SUMS` asset alongside the package tarball. The release asset smoke verifies that file before installing the tarball. Older releases that predate `SHA256SUMS` can be checked with `pnpm release:asset-smoke -- --tag <tag> --allow-missing-checksums`, but installer and update flows must not use that legacy bypass: they must fail before installing or executing downloaded content if `SHA256SUMS` is missing, if the tarball is not listed, or if the SHA-256 digest does not match.
 
+## Installer
+
+`install.sh` is the one-line GitHub Release installer documented in `README.md`. It requires Node.js, npm, curl, and POSIX `sh`; defaults to the latest release; accepts `TAG=vX.Y.Z` or `VERSION=X.Y.Z`; installs with `npm install --global --prefix "${PREFIX:-$HOME/.local}"`; verifies `SHA256SUMS` before installation; and runs `pm --help` before reporting success. It must not read Proton credentials, config files, or saved sessions.
+
 If this package should be published to npm later:
 
 1. Remove `"private": true` from `package.json`.

@@ -7,6 +7,35 @@ Automation-friendly Proton Mail CLI and reusable client package with two layers:
 
 The browser client is the canonical dependency surface when other local projects need to log into Proton Mail and read email content programmatically.
 
+## Install From GitHub Releases
+
+Prerequisites: Node.js, npm, curl, and a POSIX `sh`. The package is private to GitHub Releases and is not published to public npm.
+
+Install the latest release into `$HOME/.local`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hacker-h/proton-mail-cli/main/install.sh | sh
+```
+
+Install a specific tag or version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hacker-h/proton-mail-cli/main/install.sh | TAG=v2.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/hacker-h/proton-mail-cli/main/install.sh | VERSION=2.1.0 sh
+```
+
+Use `PREFIX` to choose a different user-writable install location. The installer runs `npm install --global --prefix "$PREFIX"` against the downloaded GitHub Release tarball, verifies `SHA256SUMS` before installing, and checks `pm --help` after installation.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hacker-h/proton-mail-cli/main/install.sh | PREFIX="$HOME/.local" sh
+```
+
+Add `$PREFIX/bin` to `PATH` if needed. To uninstall, remove the installed npm package directory and shim:
+
+```bash
+rm -rf "$HOME/.local/lib/node_modules/proton-mail-cli" "$HOME/.local/bin/pm"
+```
+
 ## CLI Usage
 
 This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls`, `pm mail search`, `pm mail latest`, and `pm read browser:index:N` are browser-backed in the installed binary and use saved-session reuse.
@@ -288,7 +317,7 @@ Update this table whenever support or live coverage changes.
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
 | Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
-| Release installer, update, and checksums | No installer/update command yet | N/A | No | #74, #75, #73 | Release artifact install/update support is tracked separately from Proton behavior. |
+| Release installer, update, and checksums | Installer script supported; no self-update command yet | N/A | No | #74, #75, #73 | Installer downloads GitHub Release tarballs, verifies `SHA256SUMS`, and runs `pm --help` after installation. |
 | Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
 | Draft lifecycle and native REST send | No | No | No | #84, #5 | Blocked by encrypted Proton payload/SRP/key research. Browser UI send coverage is not native REST send support. |
 | Attachment send/decryption | No | No for decryption/send; partial raw download only | No | #88, #95 | Requires native crypto and message decryption work. |
