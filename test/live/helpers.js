@@ -219,6 +219,8 @@ async function fillRecipient(page, testId, address) {
   const locator = page.locator(`[data-testid="${testId}"]`).last();
   await locator.fill(address);
   await locator.press("Enter");
+  await locator.press("Tab").catch(() => {});
+  await page.waitForTimeout(300);
 }
 
 async function revealRecipientField(page, buttonTestId, fieldTestId) {
@@ -228,11 +230,16 @@ async function revealRecipientField(page, buttonTestId, fieldTestId) {
   const button = page.locator(`[data-testid="${buttonTestId}"]`).first();
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await dismissModals(page);
+    await button.focus().catch(() => {});
+    await page.keyboard.press("Enter").catch(() => {});
+    if (await field.isVisible({ timeout: 1000 }).catch(() => false)) return;
+    await page.keyboard.press("Space").catch(() => {});
+    if (await field.isVisible({ timeout: 1000 }).catch(() => false)) return;
     await button.click({ force: true, timeout: 15000 }).catch(async () => {
-      await button.evaluate((node) => node.click());
+      await button.evaluate((node) => node.click()).catch(() => {});
     });
     if (await field.isVisible({ timeout: 2000 }).catch(() => false)) return;
-    await page.keyboard.press("Escape").catch(() => {});
+    await page.keyboard.press("Tab").catch(() => {});
   }
 
   const composerText = await page.locator('[data-testid^="composer:"]').evaluateAll((nodes) => nodes.map((node) => node.textContent || "").join(" ")).catch(() => "");
