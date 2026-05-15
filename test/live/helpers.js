@@ -122,11 +122,11 @@ export async function sendBrowserMessage(page, { to = [], cc = [], bcc = [], sub
 
   for (const address of to) await fillRecipient(page, "composer:to", address);
   if (cc.length > 0) {
-    await page.locator('[data-testid="composer:recipients:cc-button"]').click({ force: true, timeout: 15000 });
+    await revealRecipientField(page, "composer:recipients:cc-button", "composer:to-cc");
     for (const address of cc) await fillRecipient(page, "composer:to-cc", address);
   }
   if (bcc.length > 0) {
-    await page.locator('[data-testid="composer:recipients:bcc-button"]').click({ force: true, timeout: 15000 });
+    await revealRecipientField(page, "composer:recipients:bcc-button", "composer:to-bcc");
     for (const address of bcc) await fillRecipient(page, "composer:to-bcc", address);
   }
 
@@ -219,6 +219,31 @@ async function fillRecipient(page, testId, address) {
   const locator = page.locator(`[data-testid="${testId}"]`).last();
   await locator.fill(address);
   await locator.press("Enter");
+  await locator.press("Tab").catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+async function revealRecipientField(page, buttonTestId, fieldTestId) {
+  const field = page.locator(`[data-testid="${fieldTestId}"]`).last();
+  if (await field.isVisible({ timeout: 500 }).catch(() => false)) return;
+
+  const button = page.locator(`[data-testid="${buttonTestId}"]`).first();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await dismissModals(page);
+    await button.focus().catch(() => {});
+    await page.keyboard.press("Enter").catch(() => {});
+    if (await field.isVisible({ timeout: 1000 }).catch(() => false)) return;
+    await page.keyboard.press("Space").catch(() => {});
+    if (await field.isVisible({ timeout: 1000 }).catch(() => false)) return;
+    await button.click({ force: true, timeout: 15000 }).catch(async () => {
+      await button.evaluate((node) => node.click()).catch(() => {});
+    });
+    if (await field.isVisible({ timeout: 2000 }).catch(() => false)) return;
+    await page.keyboard.press("Tab").catch(() => {});
+  }
+
+  const composerText = await page.locator('[data-testid^="composer:"]').evaluateAll((nodes) => nodes.map((node) => node.textContent || "").join(" ")).catch(() => "");
+  assert.fail(redact(`Proton recipient field ${fieldTestId} did not appear after ${buttonTestId}: ${composerText}`));
 }
 
 async function fillComposerBody(page, body) {
