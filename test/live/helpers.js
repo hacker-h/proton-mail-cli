@@ -11,11 +11,13 @@ export const liveEnabled = process.env.PROTONMAIL_LIVE_TEST === "1";
 export const hasSeededSession = Boolean(process.env.PROTONMAIL_SESSION_JSON);
 export const hasConfiguredSessionFile = Boolean(process.env.PROTONMAIL_LIVE_SESSION_FILE && fs.existsSync(process.env.PROTONMAIL_LIVE_SESSION_FILE));
 export const hasCredentials = Boolean(process.env.PROTONMAIL_USERNAME && process.env.PROTONMAIL_PASSWORD);
+export const hasSecondaryCredentials = Boolean(process.env.PROTONMAIL_USERNAME2 && process.env.PROTONMAIL_PASSWORD2);
 export const freshLoginAllowed = process.env.PROTONMAIL_ALLOW_FRESH_LOGIN === "1";
 export const hasBrowserAuth = liveEnabled && (hasSeededSession || hasConfiguredSessionFile || (hasCredentials && freshLoginAllowed));
 export const hasRestSession = liveEnabled && Boolean(process.env.PROTONMAIL_REST_SESSION_FILE && fs.existsSync(process.env.PROTONMAIL_REST_SESSION_FILE));
 export const browserTestOptions = hasBrowserAuth ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 with PROTONMAIL_SESSION_JSON, PROTONMAIL_LIVE_SESSION_FILE, or explicit fresh-login credentials" };
 export const pureLoginTestOptions = liveEnabled && hasCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with credentials" };
+export const secondaryLoginTestOptions = liveEnabled && hasSecondaryCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with PROTONMAIL_USERNAME2/PROTONMAIL_PASSWORD2" };
 export const restTestOptions = hasRestSession ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_REST_SESSION_FILE for REST-backed live tests" };
 
 export function makeLivePrefix(scope = "live") {

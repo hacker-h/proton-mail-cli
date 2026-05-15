@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { browserTestOptions, createBrowserClient, formatLiveFailure, loginAndAssertSession, prepareSessionFile, pureLoginTestOptions } from "./helpers.js";
+import { browserTestOptions, createBrowserClient, formatLiveFailure, loginAndAssertSession, prepareSessionFile, pureLoginTestOptions, secondaryLoginTestOptions } from "./helpers.js";
 
 let tmpDir = "";
 
@@ -47,6 +47,29 @@ describe("live Proton login", browserTestOptions, () => {
     assert.equal(login.success, true, formatLiveFailure(login));
     assert.equal(login.sessionValid, true);
     assert.notEqual(login.loginMethod, "session", "Pure login must not pass only by reusing a saved session");
+    assert.equal(fs.existsSync(session.sessionFile), true);
+
+    const savedSession = JSON.parse(fs.readFileSync(session.sessionFile, "utf8"));
+    assert.ok(Array.isArray(savedSession.cookies));
+    assert.ok(savedSession.cookies.length > 0);
+  });
+
+  it("logs in to the secondary test account", secondaryLoginTestOptions, async () => {
+    const session = prepareSessionFile({ seed: false });
+    tmpDir = session.tmpDir;
+    const client = createBrowserClient(session.sessionFile, {
+      usernameEnv: "PROTONMAIL_USERNAME2",
+      passwordEnv: "PROTONMAIL_PASSWORD2",
+    });
+
+    const login = await client.loginAndSaveSession({
+      manualFallback: false,
+      timeoutSeconds: 120,
+    });
+
+    assert.equal(login.success, true, formatLiveFailure(login));
+    assert.equal(login.sessionValid, true);
+    assert.notEqual(login.loginMethod, "session", "Secondary login must not pass only by reusing the primary saved session");
     assert.equal(fs.existsSync(session.sessionFile), true);
 
     const savedSession = JSON.parse(fs.readFileSync(session.sessionFile, "utf8"));
