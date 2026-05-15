@@ -19,5 +19,6 @@ describe("live test harness guardrails", () => {
 
   it("redacts email-like values in diagnostics", () => {
     assert.equal(redact("owner@example.com token=abc"), "[email] token=[redacted]");
+    assert.equal(redact('{"token":"abc","sessionValid":false}'), '{"token":"[redacted]","sessionValid":false}');
   });
 });

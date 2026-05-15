@@ -124,7 +124,7 @@ export function formatLiveFailure(result) {
 export function redact(value) {
   return String(value)
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu, "[email]")
-    .replace(/\b(password|token|cookie|session|authorization)\b\s*[:=]\s*([^,}\s]+)/giu, "$1=[redacted]");
+    .replace(/("?\b(?:password|token|cookie|session|authorization)\b"?\s*[:=]\s*)("?)[^,"}\s]+\2/giu, "$1$2[redacted]$2");
 }
 
 function classifyFailure(result) {
