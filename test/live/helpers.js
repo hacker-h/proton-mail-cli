@@ -34,11 +34,14 @@ export function assertLivePrefix(value, prefix) {
 }
 
 export function prepareSessionFile({ seed = true, useConfigured = true } = {}) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-live-"));
   const configuredSessionFile = useConfigured ? process.env.PROTONMAIL_LIVE_SESSION_FILE || "" : "";
-  const sessionFile = configuredSessionFile || path.join(tmpDir, "session.json");
+  let tmpDir = "";
+  let sessionFile = configuredSessionFile;
   if (configuredSessionFile) {
     fs.mkdirSync(path.dirname(configuredSessionFile), { recursive: true });
+  } else {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-live-"));
+    sessionFile = path.join(tmpDir, "session.json");
   }
 
   if (seed && process.env.PROTONMAIL_SESSION_JSON && !fs.existsSync(sessionFile)) {
@@ -93,7 +96,7 @@ export function createRestClient() {
 export function runPmJson(args, env = {}) {
   const mergedEnv = { ...process.env, ...env };
   if (!mergedEnv.PROTONMAIL_SESSION_FILE) {
-    mergedEnv.PROTONMAIL_SESSION_FILE = mergedEnv.PROTONMAIL_LIVE_SESSION_FILE || process.env.PROTONMAIL_LIVE_SESSION_FILE || process.env.PROTONMAIL_SESSION_FILE || "";
+    mergedEnv.PROTONMAIL_SESSION_FILE = mergedEnv.PROTONMAIL_LIVE_SESSION_FILE || "";
   }
   const result = spawnSync(process.execPath, ["bin/pm.js", ...args, "--json", "--timeout", "120"], {
     cwd: ROOT,
@@ -121,7 +124,7 @@ export function formatLiveFailure(result) {
 export function redact(value) {
   return String(value)
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu, "[email]")
-    .replace(/(password|token|cookie|session|authorization)[^\n\r]*/giu, "$1=[redacted]");
+    .replace(/\b(password|token|cookie|session|authorization)\b\s*[:=]\s*([^,}\s]+)/giu, "$1=[redacted]");
 }
 
 function classifyFailure(result) {

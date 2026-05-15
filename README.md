@@ -344,9 +344,11 @@ Notes:
 |---|---|---:|---|---|
 | `PROTONMAIL_CONFIG_FILE` | Config JSON path when `--config` is not provided | No | Default: OS config path | `src/config.js`, README CLI examples |
 | `PROTONMAIL_USERNAME` | Proton test account username for fresh login | Yes | Required for credential login; typically an email address; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_USERNAME2` | Secondary Proton test account username for two-account live tests | Yes | Required when trusted CI runs fresh-login live tests that cover secondary login or send/receive flows | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js` |
 | `PROTONMAIL_USERNAME_FILE` | File containing the Proton username | Yes | Used when direct username env is unset | `src/config.js` secret resolution |
 | `PROTONMAIL_USERNAME_COMMAND` | Command that prints the Proton username | Yes | Used when direct and file username sources are unset | `src/config.js` secret resolution |
 | `PROTONMAIL_PASSWORD` | Proton test account password for fresh login | Yes | Required for credential login; no default | `src/browser-client.js`, `scripts/capture-session.mjs`, `scripts/probe-login-state.mjs`, `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js`, `docs/ci.md` |
+| `PROTONMAIL_PASSWORD2` | Secondary Proton test account password for two-account live tests | Yes | Required when trusted CI runs fresh-login live tests that cover secondary login or send/receive flows | `.github/workflows/live-proton.yml`, `test/live/proton-login.test.js` |
 | `PROTONMAIL_PASSWORD_FILE` | File containing the Proton password | Yes | Used when direct password env is unset | `src/config.js` secret resolution |
 | `PROTONMAIL_PASSWORD_COMMAND` | Command that prints the Proton password | Yes | Used when direct and file password sources are unset | `src/config.js` secret resolution |
 | `PROTONMAIL_ENV_FILE` | Absolute path to an env file containing credentials | No | Default: unset; if unset, tries `./env.env` then `./.env` | `src/browser-client.js`, `scripts/debug-login.mjs` |

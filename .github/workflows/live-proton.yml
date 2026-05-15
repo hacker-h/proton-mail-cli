@@ -164,6 +164,10 @@ jobs:
             echo "Fresh login was explicitly allowed, but PROTONMAIL_USERNAME or PROTONMAIL_PASSWORD is missing." >&2
             exit 1
           fi
+          if [[ -z "${PROTONMAIL_USERNAME2}" || -z "${PROTONMAIL_PASSWORD2}" ]]; then
+            echo "Fresh login was explicitly allowed, but PROTONMAIL_USERNAME2 or PROTONMAIL_PASSWORD2 is missing." >&2
+            exit 1
+          fi
 
       - name: Verify saved session or refresh with live credentials
         env:
