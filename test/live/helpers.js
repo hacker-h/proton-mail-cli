@@ -36,9 +36,9 @@ export function assertLivePrefix(value, prefix) {
   assert.ok(value.includes(prefix), `refusing to touch non-test data: ${redact(value)}`);
 }
 
-export function prepareSessionFile({ seed = true } = {}) {
+export function prepareSessionFile({ seed = true, useConfigured = true } = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "protonmail-live-"));
-  const configuredSessionFile = process.env.PROTONMAIL_LIVE_SESSION_FILE || "";
+  const configuredSessionFile = useConfigured ? process.env.PROTONMAIL_LIVE_SESSION_FILE || "" : "";
   const sessionFile = configuredSessionFile || path.join(tmpDir, "session.json");
   if (configuredSessionFile) {
     fs.mkdirSync(path.dirname(configuredSessionFile), { recursive: true });
