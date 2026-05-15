@@ -89,13 +89,13 @@ export function createRestClient() {
 }
 
 export function runPmJson(args, env = {}) {
+  const mergedEnv = { ...process.env, ...env };
+  if (!mergedEnv.PROTONMAIL_SESSION_FILE) {
+    mergedEnv.PROTONMAIL_SESSION_FILE = mergedEnv.PROTONMAIL_LIVE_SESSION_FILE || process.env.PROTONMAIL_LIVE_SESSION_FILE || process.env.PROTONMAIL_SESSION_FILE || "";
+  }
   const result = spawnSync(process.execPath, ["bin/pm.js", ...args, "--json", "--timeout", "120"], {
     cwd: ROOT,
-    env: {
-      ...process.env,
-      ...env,
-      PROTONMAIL_SESSION_FILE: process.env.PROTONMAIL_LIVE_SESSION_FILE || process.env.PROTONMAIL_SESSION_FILE || "",
-    },
+    env: mergedEnv,
     encoding: "utf8",
     maxBuffer: 1024 * 1024,
   });
