@@ -15,8 +15,8 @@ afterEach(() => {
 describe("live Proton browser send and receive", twoAccountTestOptions, () => {
   it("sends between test accounts with To, Cc, and Bcc recipients", async () => {
     const prefix = makeLivePrefix("send");
-    const primary = prepareSessionFile({ seed: false });
-    const secondary = prepareSessionFile({ seed: false });
+    const primary = prepareSessionFile({ seed: false, useConfigured: false });
+    const secondary = prepareSessionFile({ seed: false, useConfigured: false });
     primaryTmpDir = primary.tmpDir;
     secondaryTmpDir = secondary.tmpDir;
 
