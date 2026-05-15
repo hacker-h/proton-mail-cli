@@ -35,7 +35,7 @@ describe("live Proton login", browserTestOptions, () => {
   });
 
   it("logs in from scratch with username and password", pureLoginTestOptions, async () => {
-    const session = prepareSessionFile({ seed: false });
+    const session = prepareSessionFile({ seed: false, useConfigured: false });
     tmpDir = session.tmpDir;
     const client = createBrowserClient(session.sessionFile);
 
@@ -55,7 +55,7 @@ describe("live Proton login", browserTestOptions, () => {
   });
 
   it("logs in to the secondary test account", secondaryLoginTestOptions, async () => {
-    const session = prepareSessionFile({ seed: false });
+    const session = prepareSessionFile({ seed: false, useConfigured: false });
     tmpDir = session.tmpDir;
     const client = createBrowserClient(session.sessionFile, {
       usernameEnv: "PROTONMAIL_USERNAME2",
