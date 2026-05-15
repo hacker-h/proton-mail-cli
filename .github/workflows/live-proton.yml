@@ -147,6 +147,8 @@ jobs:
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
           PROTONMAIL_SESSION_JSON: ${{ secrets.PROTONMAIL_SESSION_JSON }}
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
+          PROTONMAIL_USERNAME2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 || '' }}
+          PROTONMAIL_PASSWORD2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD2 || '' }}
         run: |
           if [[ -f "${PROTONMAIL_LIVE_SESSION_FILE}" ]]; then
             exit 0
@@ -162,11 +164,17 @@ jobs:
             echo "Fresh login was explicitly allowed, but PROTONMAIL_USERNAME or PROTONMAIL_PASSWORD is missing." >&2
             exit 1
           fi
+          if [[ -z "${PROTONMAIL_USERNAME2}" || -z "${PROTONMAIL_PASSWORD2}" ]]; then
+            echo "Fresh login was explicitly allowed, but PROTONMAIL_USERNAME2 or PROTONMAIL_PASSWORD2 is missing." >&2
+            exit 1
+          fi
 
       - name: Verify saved session or refresh with live credentials
         env:
           PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
+          PROTONMAIL_USERNAME2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 || '' }}
+          PROTONMAIL_PASSWORD2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD2 || '' }}
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
         run: pnpm test:live
 
