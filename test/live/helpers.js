@@ -117,14 +117,16 @@ export async function sendBrowserMessage(page, { to = [], cc = [], bcc = [], sub
   await dismissModals(page);
   await page.locator('[data-testid="sidebar:compose"]').click({ force: true, timeout: 30000 });
   await page.locator('[data-testid="composer:to"]').waitFor({ state: "visible", timeout: 15000 });
+  await page.keyboard.press("Escape").catch(() => {});
+  await dismissModals(page);
 
   for (const address of to) await fillRecipient(page, "composer:to", address);
   if (cc.length > 0) {
-    await page.locator('[data-testid="composer:recipients:cc-button"]').click();
+    await page.locator('[data-testid="composer:recipients:cc-button"]').click({ force: true, timeout: 15000 });
     for (const address of cc) await fillRecipient(page, "composer:to-cc", address);
   }
   if (bcc.length > 0) {
-    await page.locator('[data-testid="composer:recipients:bcc-button"]').click();
+    await page.locator('[data-testid="composer:recipients:bcc-button"]').click({ force: true, timeout: 15000 });
     for (const address of bcc) await fillRecipient(page, "composer:to-bcc", address);
   }
 
