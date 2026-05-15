@@ -364,6 +364,8 @@ Update this table whenever support or live coverage changes.
 
 2FA/TOTP challenge detection is implemented for the browser login path. Automated 2FA/TOTP completion is intentionally unsupported; CI and other unattended jobs must use a pre-captured saved session instead of trying to solve 2FA during fresh login.
 
+See [docs/native-backend.md](docs/native-backend.md) for the planned native SRP auth, key unlock, message decryption, attachment decryption, and native send sequence.
+
 ## Architecture
 
 ```
