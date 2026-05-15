@@ -4,9 +4,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { verifySha256Sums } from "./release-checksums.mjs";
 
 const repo = readFlag("--repo") || process.env.GITHUB_REPOSITORY || "hacker-h/proton-mail-cli";
 const requestedTag = readFlag("--tag") || process.env.RELEASE_TAG || "latest";
+const allowMissingChecksums = process.argv.includes("--allow-missing-checksums") || process.env.ALLOW_MISSING_CHECKSUMS === "1";
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pm-release-asset-smoke-"));
 const downloadDir = path.join(tempRoot, "release");
 const appDir = path.join(tempRoot, "app");
@@ -22,6 +24,12 @@ const tarballs = fs.readdirSync(downloadDir).filter((name) => /^proton-mail-cli-
 assert.equal(tarballs.length, 1, `Expected one proton-mail-cli release tarball for ${tag}, found: ${tarballs.join(", ") || "none"}`);
 const tarball = path.join(downloadDir, tarballs[0]);
 assert.notEqual(path.dirname(tarball), process.cwd(), "release smoke must use the downloaded GitHub Release asset, not a workspace tarball");
+try {
+  verifySha256Sums(downloadDir, [tarballs[0]]);
+} catch (error) {
+  if (!allowMissingChecksums) throw error;
+  console.warn(`Warning: ${error instanceof Error ? error.message : String(error)}`);
+}
 
 const install = run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], { cwd: appDir });
 assert.equal(install.status, 0, install.stderr);
@@ -67,7 +75,7 @@ function latestReleaseTag(repository) {
 }
 
 function downloadReleaseAsset(repository, tagName, destination) {
-  const result = run("gh", ["release", "download", tagName, "--repo", repository, "--pattern", "proton-mail-cli-*.tgz", "--dir", destination, "--clobber"]);
+  const result = run("gh", ["release", "download", tagName, "--repo", repository, "--pattern", "proton-mail-cli-*.tgz", "--pattern", "SHA256SUMS", "--dir", destination, "--clobber"]);
   assert.equal(result.status, 0, result.stderr);
 }
 

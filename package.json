@@ -31,6 +31,7 @@
     "ci:offline": "pnpm typecheck && pnpm test:unit && pnpm test:package && npm pack --dry-run",
     "release:dry-run": "semantic-release --dry-run --no-ci",
     "release:asset-smoke": "node scripts/release-asset-smoke.mjs",
+    "release:checksums": "node scripts/release-checksums.mjs",
     "test": "pnpm test:unit",
     "test:unit": "node --test \"test/*.test.js\"",
     "test:package": "node --test \"test/package/*.test.js\"",
