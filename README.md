@@ -269,6 +269,38 @@ Your REST/API session store must implement at minimum:
 
 See [docs/session-store.md](docs/session-store.md) for the full method contract, stored-session schema, browser session expiry signal, rotation strategy, and a runnable in-memory reference implementation.
 
+## Feature Support and Live Coverage
+
+This matrix is the source of truth for user-visible Proton Mail capability, package/client support, and upstream live-test coverage. Offline tests prove local contracts only; they do not prove that Proton's current web UI, REST API, auth flow, selectors, rate limits, or anti-abuse controls still accept the workflow. Proton-facing checks follow the [live workflow policy](docs/ci.md#live-proton-regression) and [test-data safety rules](docs/ci.md#live-test-data-safety).
+
+Update this table whenever support or live coverage changes.
+
+| Proton feature | CLI support | Client support | Live-tested | Issue link | Notes |
+|---|---|---|---|---|---|
+| Browser login and saved-session reuse | Partial: `pm doctor session` inspects configured sessions | Yes: `ProtonMailBrowserClient.loginAndSaveSession` | Yes | #81 | CI covers seeded session reuse, isolated primary fresh login, and isolated secondary fresh login. |
+| Mail list, search, latest, and read | Yes: `pm ls`, `pm mail search`, `pm mail latest`, `pm read browser:index:N` | Yes: browser inbox/latest methods | Yes | #80 | Browser-backed reads include only previews except `pm read`, which intentionally returns body text. |
+| Two-account UI send/receive | No public send command | No public send API; live test uses Proton browser UI | Yes | #83 | Covers real To, Cc, and Bcc delivery between the two test accounts. Does not imply REST send support. |
+| REST message metadata filters | Yes for `pm ls` metadata filters when `PROTONMAIL_REST_SESSION_FILE` is configured | Yes: `getMessageMetadata`, metadata filter builder | Yes | #78 | Live smoke covers metadata reads against a real REST session. |
+| REST mail actions | Yes: mark read/unread, label/unlabel, trash/delete by stable message ID | Yes: message mutation methods | Partial | #78 | Default live CI avoids destructive actions; opt-in reversible mutation checks use test-prefixed labels. |
+| Auth/user REST endpoints | No dedicated CLI command | Yes: user/address/key-salt methods | No | #79 | Covered offline by client contract tests; live expansion can be tracked from the feature parity issue. |
+| Attachments download | No dedicated CLI command | Partial: raw attachment bytes through `getAttachment` | No | #88 | Attachment decryption and send are not implemented. |
+| Labels and folders CRUD | No dedicated CLI command | Partial: labels list/create/update/delete | No | #85 | Needs safe live CRUD coverage before claiming upstream behavior. |
+| Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
+| Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
+| Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
+| Release installer, update, and checksums | No installer/update command yet | N/A | No | #74, #75, #73 | Release artifact install/update support is tracked separately from Proton behavior. |
+| Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
+| Draft lifecycle and native REST send | No | No | No | #84, #5 | Blocked by encrypted Proton payload/SRP/key research. Browser UI send coverage is not native REST send support. |
+| Attachment send/decryption | No | No for decryption/send; partial raw download only | No | #88, #95 | Requires native crypto and message decryption work. |
+| REST message body decryption, encryption, and PGP | No | No | No | #95, #13 | Message metadata can be read, but encrypted REST body content is not decrypted. |
+| Contacts | No | No | No | #87 | Needs API research and live tests. |
+| Proton server-side search | No; browser preview filtering and REST metadata filters only | No general server-side search wrapper | No | #89 | Current `--match` is local preview matching, not Proton server-side search. |
+| Filters and rules | No | No | No | #90 | Needs API research and live tests. |
+| Import/export | No | No | No | #93 | Support matrix/evaluation pending. |
+| Mailbox settings | No | No | No | #92 | Support matrix and selected live tests pending. |
+| Undo and scheduled send | No | No | No | #94 | Needs product/API evaluation before implementation. |
+| Automated 2FA/TOTP and FIDO2/WebAuthn | No | Detection only for 2FA/TOTP challenges | No | #13 | CI must reuse saved sessions; unattended challenge solving is intentionally unsupported. |
+
 ## Implemented
 
 | Area | Methods |

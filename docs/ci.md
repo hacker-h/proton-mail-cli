@@ -58,10 +58,19 @@ The live test verifies:
 - session file creation
 - saved-session reuse without re-entering credentials
 - secondary test-account login when trusted fresh-login secrets are available
+- browser-backed CLI list/search/latest/read behavior
+- REST metadata and safe reversible action behavior when a REST session is configured
+- two-account browser UI send/receive behavior for To, Cc, and Bcc recipients
 
 If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
 
 Trusted owner, Dependabot, and scheduled runs may perform fresh username/password login when the seeded or cached session is missing or expired. Fresh login should still be treated as potentially causing Proton CAPTCHA, 2FA/TOTP, or other risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
+
+## Live Test Data Safety
+
+Live tests must operate only on dedicated Proton test accounts and must not mutate ordinary mailbox data. Test-created subjects, bodies, labels, and other mutable names use the `pm-<scope>-<run>-<random>` prefix from the shared harness, and mutation helpers assert that target data contains the current run prefix before touching it.
+
+Default CI avoids irreversible mailbox actions such as permanent delete. Reversible REST mutation coverage is opt-in and should use only test-prefixed labels/messages, clean up after itself when possible, and leave enough diagnostics to identify Proton UI/API drift without printing account addresses, cookies, session JSON, passwords, refresh payloads, or full message bodies.
 
 ## Pull Request Live Login Cache
 
