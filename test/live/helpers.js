@@ -17,6 +17,9 @@ export const hasRestSession = liveEnabled && Boolean(process.env.PROTONMAIL_REST
 export const browserTestOptions = hasBrowserAuth ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 with PROTONMAIL_SESSION_JSON, PROTONMAIL_LIVE_SESSION_FILE, or explicit fresh-login credentials" };
 export const pureLoginTestOptions = liveEnabled && hasCredentials && freshLoginAllowed ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_ALLOW_FRESH_LOGIN=1 with credentials" };
 export const restTestOptions = hasRestSession ? {} : { skip: "Set PROTONMAIL_LIVE_TEST=1 and PROTONMAIL_REST_SESSION_FILE for REST-backed live tests" };
+export const restMutationTestOptions = hasRestSession && process.env.PROTONMAIL_LIVE_REST_MUTATION === "1"
+  ? {}
+  : { skip: "Set PROTONMAIL_LIVE_TEST=1, PROTONMAIL_REST_SESSION_FILE, and PROTONMAIL_LIVE_REST_MUTATION=1 for reversible REST mutation tests" };
 
 export function makeLivePrefix(scope = "live") {
   const runId = process.env.GITHUB_RUN_ID || process.env.PROTONMAIL_LIVE_RUN_ID || String(Date.now());
