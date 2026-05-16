@@ -25,9 +25,9 @@ if (fs.existsSync(encryptedCache)) {
 }
 
 if (sessionJson) {
+  JSON.parse(sessionJson);
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, sessionJson, { encoding: "utf8", mode: 0o600 });
-  JSON.parse(sessionJson);
   console.log("Prepared live session from PROTONMAIL_SESSION_JSON.");
   process.exit(0);
 }

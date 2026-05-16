@@ -109,6 +109,7 @@ jobs:
             proton-session-${{ steps.session-key.outputs.branch }}-
 
       - name: Prepare live session
+        shell: bash
         env:
           PROTONMAIL_SESSION_JSON: ${{ secrets.PROTONMAIL_SESSION_JSON }}
           PROTONMAIL_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY }}

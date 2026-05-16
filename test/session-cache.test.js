@@ -44,6 +44,48 @@ describe("live session preparation", () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), sessionState("seed"));
   });
 
+  it("does not write malformed seeded session JSON", () => {
+    const directory = tempDir();
+    const output = path.join(directory, "session.json");
+    const result = runPrepare({
+      encrypted: path.join(directory, "missing.enc"),
+      output,
+      env: { PROTONMAIL_SESSION_JSON: "not-json" },
+    });
+    assert.equal(result.status, 1);
+    assert.equal(fs.existsSync(output), false);
+  });
+
+  it("falls back to seeded session JSON when a cache exists but the cache key is missing", () => {
+    const directory = tempDir();
+    const encrypted = path.join(directory, "session.enc");
+    const output = path.join(directory, "session.json");
+    fs.writeFileSync(encrypted, "encrypted-cache");
+
+    const result = runPrepare({
+      encrypted,
+      output,
+      env: { PROTONMAIL_SESSION_JSON: JSON.stringify(sessionState("seed")) },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /PROTONMAIL_SESSION_CACHE_KEY is missing/u);
+    assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), sessionState("seed"));
+  });
+
+  it("fails clearly when a restored cache is corrupt and no fallback is available", () => {
+    const directory = tempDir();
+    const encrypted = path.join(directory, "session.enc");
+    const output = path.join(directory, "session.json");
+    fs.writeFileSync(encrypted, "not-json");
+
+    const result = runPrepare({ encrypted, output, env: { PROTONMAIL_SESSION_CACHE_KEY: "cache-key" } });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Encrypted session cache could not be decrypted/u);
+    assert.match(result.stderr, /Missing usable branch session cache/u);
+    assert.equal(fs.existsSync(encrypted), false);
+    assert.equal(fs.existsSync(output), false);
+  });
+
   it("allows trusted fresh login when no reusable session exists", () => {
     const directory = tempDir();
     const result = runPrepare({
