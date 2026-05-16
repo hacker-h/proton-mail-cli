@@ -3,43 +3,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const args = process.argv.slice(2);
-if (args[0] === "--") {
-  args.shift();
-}
-const command = args[0] || "";
-
-if (!command || args.includes("--help") || args.includes("-h")) {
-  console.log(`
-Usage: node scripts/session-cache.mjs <encrypt|decrypt> --input <path> --output <path>
-
-Environment:
-  PROTONMAIL_SESSION_CACHE_KEY   Secret encryption key for cached session payloads
-`);
-  process.exit(command ? 0 : 1);
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
 }
 
-const input = getArg("--input");
-const output = getArg("--output");
-const secret = process.env.PROTONMAIL_SESSION_CACHE_KEY || "";
-
-if (!input || !output) {
-  fail("Missing --input or --output");
-}
-if (!secret) {
-  fail("Missing PROTONMAIL_SESSION_CACHE_KEY");
-}
-
-if (command === "encrypt") {
-  encryptFile(input, output, secret);
-} else if (command === "decrypt") {
-  decryptFile(input, output, secret);
-} else {
-  fail(`Unknown command: ${command}`);
-}
-
-function encryptFile(inputPath, outputPath, keySecret) {
+export function encryptFile(inputPath, outputPath, keySecret) {
   const plaintext = fs.readFileSync(inputPath);
   const iv = crypto.randomBytes(12);
   const key = crypto.createHash("sha256").update(keySecret).digest();
@@ -56,10 +26,10 @@ function encryptFile(inputPath, outputPath, keySecret) {
   fs.writeFileSync(outputPath, `${JSON.stringify(payload)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
-function decryptFile(inputPath, outputPath, keySecret) {
+export function decryptFile(inputPath, outputPath, keySecret) {
   const payload = JSON.parse(fs.readFileSync(inputPath, "utf8"));
   if (payload?.alg !== "aes-256-gcm" || payload?.v !== 1) {
-    fail("Unsupported session cache payload");
+    throw new Error("Unsupported session cache payload");
   }
   const key = crypto.createHash("sha256").update(keySecret).digest();
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(payload.iv, "base64"));
@@ -70,9 +40,50 @@ function decryptFile(inputPath, outputPath, keySecret) {
   fs.writeFileSync(outputPath, decrypted, { mode: 0o600 });
 }
 
-function getArg(name) {
+function main() {
+  const args = process.argv.slice(2);
+  if (args[0] === "--") {
+    args.shift();
+  }
+  const command = args[0] || "";
+
+  if (!command || args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: node scripts/session-cache.mjs <encrypt|decrypt> --input <path> --output <path>
+
+Environment:
+  PROTONMAIL_SESSION_CACHE_KEY   Secret encryption key for cached session payloads
+`);
+    process.exit(command ? 0 : 1);
+  }
+
+  const input = getArg(args, "--input");
+  const output = getArg(args, "--output");
+  const secret = process.env.PROTONMAIL_SESSION_CACHE_KEY || "";
+
+  if (!input || !output) {
+    fail("Missing --input or --output");
+  }
+  if (!secret) {
+    fail("Missing PROTONMAIL_SESSION_CACHE_KEY");
+  }
+
+  try {
+    if (command === "encrypt") {
+      encryptFile(input, output, secret);
+    } else if (command === "decrypt") {
+      decryptFile(input, output, secret);
+    } else {
+      fail(`Unknown command: ${command}`);
+    }
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function getArg(args, name) {
   const index = args.indexOf(name);
-  return index >= 0 ? args[index + 1] : "";
+  return index >= 0 ? args[index + 1] || "" : "";
 }
 
 function fail(message) {
