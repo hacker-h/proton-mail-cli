@@ -51,6 +51,27 @@ describe("live session preparation", () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), sessionState("seed"));
   });
 
+  it("falls back when decrypted cache content is not JSON", () => {
+    const directory = tempDir();
+    const source = path.join(directory, "source.txt");
+    const encrypted = path.join(directory, "session.enc");
+    const output = path.join(directory, "session.json");
+    fs.writeFileSync(source, "not-json");
+    encryptFile(source, encrypted, "cache-key");
+
+    const result = runPrepare({
+      encrypted,
+      output,
+      env: {
+        PROTONMAIL_SESSION_CACHE_KEY: "cache-key",
+        PROTONMAIL_SESSION_JSON: JSON.stringify(sessionState("seed")),
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /Encrypted session cache could not be decrypted or parsed/u);
+    assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), sessionState("seed"));
+  });
+
   it("does not write malformed seeded session JSON", () => {
     const directory = tempDir();
     const output = path.join(directory, "session.json");
