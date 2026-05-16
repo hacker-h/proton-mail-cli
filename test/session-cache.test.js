@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -9,6 +9,13 @@ import { encryptFile } from "../scripts/session-cache.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PREPARE = path.join(ROOT, "scripts", "prepare-live-session.mjs");
+const tempDirs = [];
+
+after(() => {
+  for (const directory of tempDirs) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("live session preparation", () => {
   it("uses a valid encrypted branch cache", () => {
@@ -53,6 +60,7 @@ describe("live session preparation", () => {
       env: { PROTONMAIL_SESSION_JSON: "not-json" },
     });
     assert.equal(result.status, 1);
+    assert.match(result.stderr, /PROTONMAIL_SESSION_JSON is not valid JSON/u);
     assert.equal(fs.existsSync(output), false);
   });
 
@@ -118,5 +126,7 @@ function sessionState(value) {
 }
 
 function tempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "pm-session-cache-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pm-session-cache-"));
+  tempDirs.push(directory);
+  return directory;
 }

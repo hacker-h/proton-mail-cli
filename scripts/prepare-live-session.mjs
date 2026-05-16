@@ -9,6 +9,8 @@ const cacheKey = process.env.PROTONMAIL_SESSION_CACHE_KEY || "";
 const sessionJson = process.env.PROTONMAIL_SESSION_JSON || "";
 const freshLoginAllowed = process.env.PROTONMAIL_ALLOW_FRESH_LOGIN === "1";
 
+fs.mkdirSync(path.dirname(output), { recursive: true });
+
 if (fs.existsSync(encryptedCache)) {
   if (!cacheKey) {
     warn("Encrypted session cache exists, but PROTONMAIL_SESSION_CACHE_KEY is missing; falling back.");
@@ -25,8 +27,12 @@ if (fs.existsSync(encryptedCache)) {
 }
 
 if (sessionJson) {
-  JSON.parse(sessionJson);
-  fs.mkdirSync(path.dirname(output), { recursive: true });
+  try {
+    JSON.parse(sessionJson);
+  } catch {
+    console.error("PROTONMAIL_SESSION_JSON is not valid JSON.");
+    process.exit(1);
+  }
   fs.writeFileSync(output, sessionJson, { encoding: "utf8", mode: 0o600 });
   console.log("Prepared live session from PROTONMAIL_SESSION_JSON.");
   process.exit(0);
