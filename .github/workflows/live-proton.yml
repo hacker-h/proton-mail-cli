@@ -114,31 +114,7 @@ jobs:
           PROTONMAIL_SESSION_JSON: ${{ secrets.PROTONMAIL_SESSION_JSON }}
           PROTONMAIL_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY }}
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
-        run: |
-          set -euo pipefail
-          mkdir -p .ci-proton
-
-          if [[ -f .ci-proton/session.enc ]]; then
-            if [[ -z "${PROTONMAIL_SESSION_CACHE_KEY}" ]]; then
-              echo "Encrypted session cache exists, but PROTONMAIL_SESSION_CACHE_KEY is missing." >&2
-              exit 1
-            fi
-            pnpm session:cache -- decrypt --input .ci-proton/session.enc --output "${PROTONMAIL_LIVE_SESSION_FILE}"
-            exit 0
-          fi
-
-          if [[ -n "${PROTONMAIL_SESSION_JSON}" ]]; then
-            printf '%s' "${PROTONMAIL_SESSION_JSON}" > "${PROTONMAIL_LIVE_SESSION_FILE}"
-            chmod 600 "${PROTONMAIL_LIVE_SESSION_FILE}"
-            exit 0
-          fi
-
-          if [[ "${PROTONMAIL_ALLOW_FRESH_LOGIN}" == "1" ]]; then
-            exit 0
-          fi
-
-            echo "Missing branch session cache and PROTONMAIL_SESSION_JSON, and this event is not allowed to use Proton credentials." >&2
-            exit 1
+        run: node scripts/prepare-live-session.mjs --encrypted-cache .ci-proton/session.enc --output "${PROTONMAIL_LIVE_SESSION_FILE}"
 
       - name: Verify live credentials are configured
         shell: bash

@@ -87,7 +87,7 @@ Cache behavior:
 - fallback: `PROTONMAIL_SESSION_JSON` when no cache exists for the current branch/bucket
 - fresh password login: enabled for trusted owner-launched runs, scheduled runs, owner same-repository PRs, and Dependabot PRs
 
-The exact cache bucket is intentionally short-lived, but the restore fallback lets scheduled CI try the newest encrypted session for the same branch before falling back to repository secrets or username/password refresh. Successful runs save a refreshed encrypted session for the current six-hour bucket.
+The exact cache bucket is intentionally short-lived, but the restore fallback lets scheduled CI try the newest encrypted session for the same branch before falling back to repository secrets or username/password refresh. If the restored encrypted cache cannot be decrypted or parsed, CI treats it as stale/corrupt, removes it from the workspace, and falls back to `PROTONMAIL_SESSION_JSON` or trusted fresh login. Successful runs save a refreshed encrypted session for the current six-hour bucket.
 
 Do not cache raw session JSON. The workflow only caches `.ci-proton/session.enc`.
 
