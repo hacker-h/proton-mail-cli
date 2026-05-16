@@ -43,6 +43,7 @@
     "login:probe": "node scripts/probe-login-state.mjs",
     "session:capture": "node scripts/capture-session.mjs",
     "session:cache": "node scripts/session-cache.mjs",
+    "session:prepare-live": "node scripts/prepare-live-session.mjs",
     "session:secret": "node scripts/set-session-secret.mjs"
   },
   "dependencies": {
