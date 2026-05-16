@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/hacker-h/proton-mail-cli/compare/v2.1.0...v2.2.0) (2026-05-15)
+
+
+### Features
+
+* add GitHub release installer ([7f377d4](https://github.com/hacker-h/proton-mail-cli/commit/7f377d4a7ac73f04c5b9b4747262e2783dc66e8d))
+
 # [2.1.0](https://github.com/hacker-h/proton-mail-cli/compare/v2.0.0...v2.1.0) (2026-05-12)
 
 
