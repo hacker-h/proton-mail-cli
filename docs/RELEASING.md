@@ -16,15 +16,15 @@ The release job runs `pnpm ci:offline` before publishing, so release eligibility
 
 GitHub Release notes are the release changelog source of truth. The release workflow does not push generated changelog or version commits back to `main`, because `main` is protected and all repository changes must go through pull requests.
 
-## First Release Baseline
+## Release Version Source
 
-This repository currently has no release tags. The first semantic-release run on `main` will calculate its release from the existing Conventional Commit history. If maintainers need to preserve the current `package.json` version line as the first baseline, create the intended baseline tag before merging release automation.
+semantic-release calculates the next version from the latest release tag on `main`. Do not use the repository `package.json` version as the release source of truth.
 
 ## Package Artifact
 
 `package.json` is currently marked `private`, so releases do not publish to the npm registry. The release workflow instead runs `@semantic-release/npm` with `npmPublish: false`, creates a packed `.tgz` artifact, and attaches that tarball to the GitHub Release.
 
-semantic-release updates `package.json` only in the release job workspace before packing. The repository `package.json` intentionally keeps a `0.0.0` baseline for local and git-URL checkouts; the git tag, GitHub Release, tarball filename, and tarball metadata are the source of truth for the published artifact version.
+semantic-release updates `package.json` only in the release job workspace before packing. The repository `package.json` intentionally keeps a `0.0.0` baseline, so local checkouts and git-URL installs report `pm 0.0.0`. The release tarball reports the actual semantic-release version; the git tag, GitHub Release, tarball filename, and tarball metadata are the source of truth for published versions.
 
 ## Release Asset Smoke
 
