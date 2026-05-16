@@ -1,3 +1,7 @@
+# Historical Changelog
+
+This file is kept for historical releases through `v2.2.0`. Current release notes are published on GitHub Releases with each semantic-release tag, and generated release notes are not committed back to protected `main`.
+
 # [2.2.0](https://github.com/hacker-h/proton-mail-cli/compare/v2.1.0...v2.2.0) (2026-05-15)
 
 

@@ -24,7 +24,7 @@ This repository currently has no release tags. The first semantic-release run on
 
 `package.json` is currently marked `private`, so releases do not publish to the npm registry. The release workflow instead runs `@semantic-release/npm` with `npmPublish: false`, creates a packed `.tgz` artifact, and attaches that tarball to the GitHub Release.
 
-semantic-release updates `package.json` only in the release job workspace before packing. The repository `package.json` can remain at the last committed baseline version; the git tag, GitHub Release, tarball filename, and tarball metadata are the source of truth for the published artifact.
+semantic-release updates `package.json` only in the release job workspace before packing. The repository `package.json` intentionally keeps a `0.0.0` baseline for local and git-URL checkouts; the git tag, GitHub Release, tarball filename, and tarball metadata are the source of truth for the published artifact version.
 
 ## Release Asset Smoke
 
