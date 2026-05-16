@@ -80,6 +80,20 @@ describe("live session preparation", () => {
     assert.deepEqual(JSON.parse(fs.readFileSync(output, "utf8")), sessionState("seed"));
   });
 
+  it("fails clearly when a cache exists but the cache key is missing and no fallback is available", () => {
+    const directory = tempDir();
+    const encrypted = path.join(directory, "session.enc");
+    const output = path.join(directory, "session.json");
+    fs.writeFileSync(encrypted, "encrypted-cache");
+
+    const result = runPrepare({ encrypted, output });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PROTONMAIL_SESSION_CACHE_KEY is missing/u);
+    assert.match(result.stderr, /Missing usable branch session cache/u);
+    assert.equal(fs.existsSync(encrypted), true);
+    assert.equal(fs.existsSync(output), false);
+  });
+
   it("fails clearly when a restored cache is corrupt and no fallback is available", () => {
     const directory = tempDir();
     const encrypted = path.join(directory, "session.enc");
