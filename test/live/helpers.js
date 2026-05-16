@@ -68,13 +68,16 @@ export function cleanupTmpDir(tmpDir) {
 
 export function createBrowserClient(sessionFile, options = {}) {
   const headless = process.env.PROTONMAIL_LIVE_HEADLESS !== "0";
-  return new ProtonMailBrowserClient({
+  const client = new ProtonMailBrowserClient({
     headless,
     sessionFile,
     timeoutSeconds: 120,
     manualLoginTimeoutSeconds: 120,
     ...options,
   });
+  client.liveSessionFile = sessionFile;
+  client.liveOptions = options;
+  return client;
 }
 
 export async function openLiveInboxPage({ sessionFile, usernameEnv = "PROTONMAIL_USERNAME", passwordEnv = "PROTONMAIL_PASSWORD" } = {}) {
@@ -159,11 +162,20 @@ export async function pollBrowserMessage({ sessionFile, usernameEnv, passwordEnv
 
 export async function loginAndAssertSession(client) {
   const headless = process.env.PROTONMAIL_LIVE_HEADLESS !== "0";
-  const login = await client.loginAndSaveSession({
+  let login = await client.loginAndSaveSession({
     headless,
     manualFallback: false,
     timeoutSeconds: 120,
   });
+
+  if (shouldRetryWithFreshLogin(login, client.liveSessionFile, client.liveOptions)) {
+    fs.rmSync(client.liveSessionFile, { force: true });
+    login = await createBrowserClient(client.liveSessionFile, client.liveOptions || {}).loginAndSaveSession({
+      headless,
+      manualFallback: false,
+      timeoutSeconds: 120,
+    });
+  }
 
   assert.equal(login.success, true, formatLiveFailure(login));
   assert.equal(login.sessionValid, true);
@@ -171,6 +183,17 @@ export async function loginAndAssertSession(client) {
     assert.equal(login.loginMethod, "session", "Seeded CI sessions must be reused without credential login");
   }
   return login;
+}
+
+export function shouldRetryWithFreshLogin(result, sessionFile, options = {}, env = process.env) {
+  if (env.PROTONMAIL_ALLOW_FRESH_LOGIN !== "1" || !hasLiveCredentials(options, env) || !sessionFile) return false;
+  if (result?.success === true && result?.sessionValid === true) return false;
+  const error = String(result?.error || "");
+  return error.includes("target mail folder was not reachable") || result?.sessionValid === false;
+}
+
+export function hasLiveCredentials({ usernameEnv = "PROTONMAIL_USERNAME", passwordEnv = "PROTONMAIL_PASSWORD" } = {}, env = process.env) {
+  return Boolean(env[usernameEnv] && env[passwordEnv]);
 }
 
 export function createRestClient() {

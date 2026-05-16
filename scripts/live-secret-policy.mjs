@@ -43,7 +43,7 @@ export function resolveLiveSecretPolicy(input) {
   const ownerDispatchedRefresh = eventName === "workflow_dispatch" && dispatchAllowFreshLogin && actor === repositoryOwner;
   return {
     trusted,
-    allowFreshLogin: trusted || ownerDispatchedRefresh,
+    allowFreshLogin: eventName === "workflow_dispatch" ? ownerDispatchedRefresh : trusted,
   };
 }
 

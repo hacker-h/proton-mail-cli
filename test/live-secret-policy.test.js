@@ -27,6 +27,28 @@ describe("live Proton secret policy", () => {
     });
   });
 
+  it("honors the manual dispatch fresh-login input", () => {
+    assert.deepEqual(resolveLiveSecretPolicy({
+      eventName: "workflow_dispatch",
+      actor: "hacker-h",
+      repositoryOwner: "hacker-h",
+      dispatchAllowFreshLogin: "0",
+    }), {
+      trusted: true,
+      allowFreshLogin: false,
+    });
+
+    assert.deepEqual(resolveLiveSecretPolicy({
+      eventName: "workflow_dispatch",
+      actor: "hacker-h",
+      repositoryOwner: "hacker-h",
+      dispatchAllowFreshLogin: "1",
+    }), {
+      trusted: true,
+      allowFreshLogin: true,
+    });
+  });
+
   it("does not expose fresh-login secrets to untrusted pull requests", () => {
     assert.deepEqual(resolveLiveSecretPolicy({
       eventName: "pull_request",

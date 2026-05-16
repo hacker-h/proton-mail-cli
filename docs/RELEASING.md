@@ -14,17 +14,17 @@ The release job runs `pnpm ci:offline` before publishing, so release eligibility
 
 ## Changelog
 
-semantic-release writes release notes to `CHANGELOG.md` during the release and commits the changelog plus the release `package.json` version back to `main` with a `[skip ci]` release commit.
+GitHub Release notes are the release changelog source of truth. The release workflow does not push generated changelog or version commits back to `main`, because `main` is protected and all repository changes must go through pull requests.
 
-## First Release Baseline
+## Release Version Source
 
-This repository currently has no release tags. The first semantic-release run on `main` will calculate its release from the existing Conventional Commit history. If maintainers need to preserve the current `package.json` version line as the first baseline, create the intended baseline tag before merging release automation.
+semantic-release calculates the next version from the latest release tag on `main`. Do not use the repository `package.json` version as the release source of truth.
 
 ## Package Artifact
 
 `package.json` is currently marked `private`, so releases do not publish to the npm registry. The release workflow instead runs `@semantic-release/npm` with `npmPublish: false`, creates a packed `.tgz` artifact, and attaches that tarball to the GitHub Release.
 
-semantic-release updates `package.json` in the release job workspace before packing. The release commit stores the changelog and package version in git, while the git tag and GitHub Release remain the source of truth for the published artifact.
+semantic-release updates `package.json` only in the release job workspace before packing. The repository `package.json` intentionally keeps a `0.0.0` baseline, so local checkouts and git-URL installs report `pm 0.0.0`. The release tarball reports the actual semantic-release version; the git tag, GitHub Release, tarball filename, and tarball metadata are the source of truth for published versions.
 
 ## Release Asset Smoke
 
@@ -53,6 +53,6 @@ If this package should be published to npm later:
 
 ## Secrets And Permissions
 
-Current GitHub-only releases require no repository secrets. The workflow uses the built-in `GITHUB_TOKEN` with `contents: write`, `issues: write`, and `pull-requests: write` so semantic-release can create releases and comment on released issues or pull requests.
+Current GitHub-only releases require no repository secrets. The workflow uses the built-in `GITHUB_TOKEN` with `contents: write`, `issues: write`, and `pull-requests: write` so semantic-release can create tags/releases and comment on released issues or pull requests. It must not bypass branch protection or push commits directly to `main`.
 
 Live Proton regression secrets are intentionally separate from release automation. Do not make `pnpm test:live` a release prerequisite; Proton-side drift should not block deterministic package releases.
