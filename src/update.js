@@ -39,7 +39,7 @@ export class UpdateError extends Error {
  * @returns {Promise<UpdateResult>}
  */
 export async function runUpdate(options = {}) {
-  const repo = options.repo || process.env.PROTON_MAIL_CLI_UPDATE_REPO || DEFAULT_REPO;
+  const repo = normalizeRepo(options.repo || process.env.PROTON_MAIL_CLI_UPDATE_REPO || DEFAULT_REPO);
   const apiBase = options.apiBase || process.env.PROTON_MAIL_CLI_UPDATE_API_BASE || DEFAULT_API_BASE;
   const requestedTag = normalizeRequestedTag(options.tag || options.version || "latest");
   const packageRoot = path.resolve(options.packageRoot || defaultPackageRoot());
@@ -96,6 +96,13 @@ export function normalizeRequestedTag(value) {
   if (/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(tag)) return tag;
   if (/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u.test(tag)) return `v${tag}`;
   throw new UpdateError("INVALID_UPDATE_TAG", "--tag/--version must be 'latest', 'vX.Y.Z', or 'X.Y.Z'", { tag });
+}
+
+/** @param {string} value */
+export function normalizeRepo(value) {
+  const repo = String(value || "").trim();
+  if (/^[\w.-]+\/[\w.-]+$/u.test(repo)) return repo;
+  throw new UpdateError("INVALID_REPO", "--repo must use owner/name format", { repo });
 }
 
 /** @param {string} packageRoot */
@@ -203,7 +210,7 @@ function verifyDownloadedSha256Sums(directory, requiredFile) {
  * @param {Runner | undefined} runner
  */
 function runChecked(command, args, runner) {
-  const result = runner ? runner(command, args) : spawnSync(command, args, { encoding: "utf8", shell: process.platform === "win32" });
+  const result = runner ? runner(command, args) : spawnCommand(command, args);
   const status = result?.status ?? 1;
   if (status === 0) return;
   throw new UpdateError("UPDATE_COMMAND_FAILED", `${command} ${args.join(" ")} failed`, {
@@ -211,6 +218,24 @@ function runChecked(command, args, runner) {
     status,
     stderr: result?.stderr || result?.error?.message || "",
   });
+}
+
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @returns {CommandResult}
+ */
+function spawnCommand(command, args) {
+  if (process.platform !== "win32") return spawnSync(command, args, { encoding: "utf8" });
+  const shell = process.env.ComSpec || "cmd.exe";
+  const commandLine = [command, ...args].map(quoteWindowsArg).join(" ");
+  return spawnSync(shell, ["/d", "/s", "/c", commandLine], { encoding: "utf8" });
+}
+
+/** @param {string} value */
+function quoteWindowsArg(value) {
+  if (!/[\s"&|<>^]/u.test(value)) return value;
+  return `"${value.replace(/(\\*)"/gu, '$1$1\\"').replace(/\\+$/u, "$&$&")}"`;
 }
 
 /** @param {string} prefix */

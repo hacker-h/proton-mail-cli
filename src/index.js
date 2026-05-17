@@ -7,7 +7,7 @@ export {
 export { ProtonHttp } from "./http.js";
 export { FileSessionStore } from "./rest-session-store.js";
 export { runPm, runPmCli, parseArgv, dispatchCommand, CliError, CLI_EXIT } from "./cli.js";
-export { runUpdate, normalizeRequestedTag, inferInstallPrefix, UpdateError } from "./update.js";
+export { runUpdate, normalizeRequestedTag, normalizeRepo, inferInstallPrefix, UpdateError } from "./update.js";
 export { buildMailMetadataFilter, filterMailMessages, parseBrowserMessageRef } from "./mail-runner.js";
 export { defaultConfigFile, defaultSessionFilePath, resolveCliConfig, resolveSecret, doctorConfig, doctorSession, inspectSessionFile, redact } from "./config.js";
 export { ApiError, RateLimitError, SessionExpiredError } from "./errors.js";

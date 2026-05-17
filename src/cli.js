@@ -909,9 +909,11 @@ function normalizeUpdateResult(result) {
 function updateFailureCode(status) {
   if (status === "unsupported_install_mode") return "UNSUPPORTED_INSTALL_MODE";
   if (status === "invalid_tag") return "INVALID_UPDATE_TAG";
+  if (status === "invalid_repo") return "INVALID_REPO";
   if (status === "missing_checksums") return "MISSING_CHECKSUMS";
   if (status === "unsupported_release_assets") return "UNSUPPORTED_RELEASE_ASSETS";
   if (status === "release_metadata_failed") return "RELEASE_METADATA_FAILED";
+  if (status === "release_asset_download_failed") return "RELEASE_ASSET_DOWNLOAD_FAILED";
   if (status === "install_failed") return "UPDATE_INSTALL_FAILED";
   if (status === "checksum_failed") return "CHECKSUM_FAILED";
   return "UPDATE_FAILED";
@@ -921,9 +923,11 @@ function updateFailureCode(status) {
 function updateFailureMessage(status) {
   if (status === "unsupported_install_mode") return "pm update is only supported for installer-managed GitHub Release installs";
   if (status === "invalid_tag") return "--tag/--version must be latest, vX.Y.Z, or X.Y.Z";
+  if (status === "invalid_repo") return "--repo must use owner/name format";
   if (status === "missing_checksums") return "Downloaded release is missing SHA256SUMS";
   if (status === "unsupported_release_assets") return "GitHub Release does not contain exactly one supported tarball asset";
   if (status === "release_metadata_failed") return "Failed to fetch GitHub Release metadata";
+  if (status === "release_asset_download_failed") return "Failed to download GitHub Release assets";
   if (status === "install_failed") return "npm install or updated pm verification failed";
   if (status === "checksum_failed") return "Downloaded release checksum verification failed";
   return "pm update failed";

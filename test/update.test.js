@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { inferInstallPrefix, normalizeRequestedTag, runUpdate, UpdateError } from "../src/update.js";
+import { inferInstallPrefix, normalizeRepo, normalizeRequestedTag, runUpdate, UpdateError } from "../src/update.js";
 
 describe("pm update", () => {
   it("normalizes accepted update tags", () => {
@@ -13,6 +13,11 @@ describe("pm update", () => {
     assert.equal(normalizeRequestedTag("v2.2.1"), "v2.2.1");
     assert.equal(normalizeRequestedTag("2.2.1"), "v2.2.1");
     assert.throws(() => normalizeRequestedTag("main"), { code: "INVALID_UPDATE_TAG" });
+  });
+
+  it("validates GitHub repository names before URL construction", () => {
+    assert.equal(normalizeRepo(" owner/repo "), "owner/repo");
+    assert.throws(() => normalizeRepo("owner/repo?bad=1"), { code: "INVALID_REPO" });
   });
 
   it("infers installer prefixes from npm global package paths", () => {
@@ -99,7 +104,10 @@ describe("pm update", () => {
     assert.equal(result.status, "updated");
     assert.deepEqual(calls[0][0], "npm");
     assert.deepEqual(calls[0][1].slice(0, 5), ["install", "--global", "--prefix", fixture.prefix, "--no-audit"]);
-    assert.equal(calls[1][0], path.join(fixture.prefix, "bin", process.platform === "win32" ? "pm.cmd" : "pm"));
+    const expectedPm = process.platform === "win32"
+      ? path.join(fixture.prefix, "pm.cmd")
+      : path.join(fixture.prefix, "bin", "pm");
+    assert.equal(calls[1][0], expectedPm);
     assert.deepEqual(calls[1][1], ["--help"]);
   });
 });
