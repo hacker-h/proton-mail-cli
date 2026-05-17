@@ -46,6 +46,26 @@ describe("live session diagnostics", () => {
     }).category, "missing_fresh_login_credentials");
   });
 
+  it("distinguishes missing cache keys before fresh-login fallback diagnosis", () => {
+    assert.equal(resolveLiveSessionDiagnostic({
+      liveTestOutcome: "failure",
+      allowFreshLogin: "0",
+      hasSessionCache: "1",
+      hasSessionCacheKey: "0",
+      hasSessionJson: "0",
+    }).category, "missing_session_cache_key");
+
+    assert.equal(resolveLiveSessionDiagnostic({
+      liveTestOutcome: "failure",
+      allowFreshLogin: "1",
+      hasSessionCache: "1",
+      hasSessionCacheKey: "0",
+      hasSessionJson: "0",
+      hasPrimaryCredentials: "1",
+      hasSecondaryCredentials: "1",
+    }).category, "missing_session_cache_key");
+  });
+
   it("distinguishes expired saved sessions from auth or backend drift", () => {
     assert.equal(resolveLiveSessionDiagnostic({
       liveTestOutcome: "failure",

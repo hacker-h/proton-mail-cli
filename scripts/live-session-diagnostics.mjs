@@ -26,7 +26,7 @@ export function resolveLiveSessionDiagnostic(input) {
   const hasPrimaryCredentials = flag(input.hasPrimaryCredentials);
   const hasSecondaryCredentials = flag(input.hasSecondaryCredentials);
   const hasReusableSession = hasSessionJson || hasSessionCache;
-  const liveFailure = classifyLiveTestLog(input.liveTestLog || process.env.LIVE_TEST_LOG || "");
+  const liveFailure = classifyLiveTestLog(input.liveTestLog || "");
 
   let category = "unknown_live_failure";
   if (outcome === "success") {
@@ -37,7 +37,7 @@ export function resolveLiveSessionDiagnostic(input) {
     category = liveFailure;
   } else if (!hasReusableSession && !allowFreshLogin) {
     category = "missing_session_json";
-  } else if (hasSessionCache && !hasSessionCacheKey && !hasSessionJson && !allowFreshLogin) {
+  } else if (hasSessionCache && !hasSessionCacheKey && !hasSessionJson) {
     category = "missing_session_cache_key";
   } else if (allowFreshLogin && (!hasPrimaryCredentials || !hasSecondaryCredentials)) {
     category = "missing_fresh_login_credentials";

@@ -44,11 +44,21 @@ const client = new ProtonMailBrowserClient({
   manualLoginTimeoutSeconds: timeoutSeconds,
 });
 
-const login = await client.loginAndSaveSession({
-  headless: true,
-  manualFallback: false,
-  timeoutSeconds,
-});
+let login;
+try {
+  login = await client.loginAndSaveSession({
+    headless: true,
+    manualFallback: false,
+    timeoutSeconds,
+  });
+} catch (error) {
+  output({
+    success: false,
+    category: "selector_or_backend_drift",
+    error: redact(error instanceof Error ? error.message : String(error)),
+  });
+  process.exit(1);
+}
 
 await login.context?.close().catch(() => {});
 await login.browser?.close().catch(() => {});
