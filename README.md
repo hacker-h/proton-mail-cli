@@ -332,7 +332,7 @@ Update this table whenever support or live coverage changes.
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
 | Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
-| Release installer, update, and checksums | Installer script supported; no self-update command yet | N/A | No | #74, #75, #73 | Installer downloads GitHub Release tarballs, verifies `SHA256SUMS`, and runs `pm --help` after installation. |
+| Release installer, update, and checksums | Installer and `pm update` supported | N/A | No | #74, #75, #73 | Installer/update flows download GitHub Release tarballs, verify `SHA256SUMS`, and run `pm --help` after installation. |
 | Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
 | Draft lifecycle and native REST send | No | No | No | #84, #5 | Blocked by encrypted Proton payload/SRP/key research. Browser UI send coverage is not native REST send support. |
 | Attachment send/decryption | No | No for decryption/send; partial raw download only | No | #88, #95 | Requires native crypto and message decryption work. |
