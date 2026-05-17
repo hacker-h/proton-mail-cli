@@ -21,8 +21,11 @@ describe("live Proton REST metadata and API smoke", restTestOptions, () => {
 
     const conversationId = findConversationId(metadata.messages, conversations.conversations);
     if (conversationId) {
-      const conversation = await client.getConversation(conversationId);
-      assertStableObject(conversation, "conversation payload");
+      const detail = await client.getConversation(conversationId);
+      assertStableObject(detail, "conversation payload");
+      const conversation = /** @type {Record<string, unknown>} */ (detail || {}).Conversation;
+      assertStableObject(conversation, "nested conversation payload");
+      assert.equal(/** @type {Record<string, unknown>} */ (conversation).ID, conversationId);
     }
 
     const eventId = await client.getLatestEventId();
@@ -123,8 +126,9 @@ describe("live Proton REST reversible mutations", restMutationTestOptions, () =>
 
       await client.labelMessages([messageId], labelId);
 
-      const events = await client.getEvents(eventId);
+      const events = await waitForMutationEvent(client, eventId, messageId, labelId);
       assertStableObject(events, "events after mutation payload");
+      assert.notEqual(events.EventID, eventId, "event stream should advance after mutation");
     } finally {
       if (labelId) {
         try {
@@ -155,4 +159,26 @@ function findConversationId(messages, conversations) {
 
 function assertStableObject(value, label) {
   assert.ok(value && typeof value === "object" && !Array.isArray(value), `${label} should be an object`);
+}
+
+async function waitForMutationEvent(client, eventId, messageId, labelId) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const events = await client.getEvents(eventId);
+    if (hasMutationEvent(events, eventId, messageId, labelId)) return events;
+    await delay(2000);
+  }
+  const events = await client.getEvents(eventId);
+  assert.fail(`event stream did not include mutation for ${messageId}: ${redact(JSON.stringify(events))}`);
+}
+
+function hasMutationEvent(events, previousEventId, messageId, labelId) {
+  if (!events || typeof events !== "object" || Array.isArray(events)) return false;
+  const record = /** @type {Record<string, unknown>} */ (events);
+  if (typeof record.EventID !== "string" || record.EventID === previousEventId) return false;
+  const serialized = JSON.stringify(record);
+  return serialized.includes(messageId) || serialized.includes(labelId);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

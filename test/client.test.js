@@ -292,13 +292,15 @@ describe("ProtonMailClient", () => {
     assert.ok(listUrl.toString().includes("/mail/v4/conversations"));
     assert.equal(listOptions.method, "POST");
     assert.deepEqual(JSON.parse(listOptions.body), { LabelID: Labels.INBOX, Page: 1, PageSize: 5, Sort: "ID" });
-    assert.ok(fetchImpl.mock.calls[1].arguments[0].toString().includes("/mail/v4/conversations/conv1"));
+    const [detailUrl, detailOptions] = fetchImpl.mock.calls[1].arguments;
+    assert.ok(detailUrl.toString().includes("/mail/v4/conversations/conv1"));
+    assert.equal(detailOptions.method, "GET");
   });
 
   it("fetches latest event id and event stream payloads", async () => {
     const fetchImpl = mockFetchSequence([
       { status: 200, body: { Code: 1000, EventID: "event-1" } },
-      { status: 200, body: { Code: 1000, EventID: "event-2", More: false } },
+      { status: 200, body: { Code: 1000, EventID: "event-2", More: 0 } },
     ]);
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
 
@@ -307,7 +309,7 @@ describe("ProtonMailClient", () => {
 
     assert.equal(eventId, "event-1");
     assert.equal(events?.EventID, "event-2");
-    assert.equal(events?.More, false);
+    assert.equal(events?.More, 0);
     assert.ok(fetchImpl.mock.calls[0].arguments[0].toString().includes("/core/v5/events/latest"));
     assert.ok(fetchImpl.mock.calls[1].arguments[0].toString().includes("/core/v5/events/event-1"));
   });
