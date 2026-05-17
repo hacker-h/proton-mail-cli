@@ -1,0 +1,63 @@
+name: Refresh Proton Session Secret
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  refresh-session-secret:
+    name: Refresh PROTONMAIL_SESSION_JSON
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROTONMAIL_SESSION_FILE: .ci-proton/session.json
+      PROTONMAIL_LIVE_HEADLESS: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify refresh secrets are configured
+        env:
+          PROTONMAIL_USERNAME: ${{ secrets.PROTONMAIL_USERNAME }}
+          PROTONMAIL_PASSWORD: ${{ secrets.PROTONMAIL_PASSWORD }}
+          GH_TOKEN: ${{ secrets.SESSION_SECRET_ROTATION_TOKEN }}
+        run: |
+          if [[ -z "${PROTONMAIL_USERNAME}" || -z "${PROTONMAIL_PASSWORD}" ]]; then
+            echo "Missing PROTONMAIL_USERNAME or PROTONMAIL_PASSWORD for session refresh." >&2
+            exit 1
+          fi
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "Missing SESSION_SECRET_ROTATION_TOKEN for updating PROTONMAIL_SESSION_JSON." >&2
+            exit 1
+          fi
+
+      - name: Refresh session secret
+        env:
+          PROTONMAIL_USERNAME: ${{ secrets.PROTONMAIL_USERNAME }}
+          PROTONMAIL_PASSWORD: ${{ secrets.PROTONMAIL_PASSWORD }}
+          GH_TOKEN: ${{ secrets.SESSION_SECRET_ROTATION_TOKEN }}
+        run: pnpm session:refresh-secret -- --repo "$GITHUB_REPOSITORY" --json
