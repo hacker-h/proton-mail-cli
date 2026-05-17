@@ -148,7 +148,7 @@ describe("live Proton REST generated-message mailbox actions", mailboxActionTest
       await assertCliAction(["mail", "archive", messageId], Labels.ARCHIVE, messageId);
       await assertCliAction(["mail", "unarchive", messageId], Labels.INBOX, messageId);
       await assertCliAction(["mail", "star", messageId], Labels.STARRED, messageId);
-      runPmJson(["mail", "unstar", messageId], { PROTONMAIL_REST_SESSION_FILE: process.env.PROTONMAIL_REST_SESSION_FILE || "" });
+      await assertCliRemoval(["mail", "unstar", messageId], Labels.STARRED, messageId);
       await assertMessageNotInLabel(client, messageId, Labels.STARRED);
       await assertCliAction(["mail", "spam", messageId], Labels.SPAM, messageId);
       await assertCliAction(["mail", "not-spam", messageId], Labels.INBOX, messageId);
@@ -175,6 +175,14 @@ async function assertCliAction(args, labelId, messageId) {
   await assertMessageInLabel(createRestClient(), messageId, labelId);
 }
 
+async function assertCliRemoval(args, labelId, messageId) {
+  const result = runPmJson(args, { PROTONMAIL_REST_SESSION_FILE: process.env.PROTONMAIL_REST_SESSION_FILE || "" });
+  assert.equal(result.ok, true, redact(JSON.stringify(result.error || result)));
+  assert.equal(result.data.source, "rest");
+  assert.deepEqual(result.data.affected, [messageId]);
+  await assertMessageNotInLabel(createRestClient(), messageId, labelId);
+}
+
 async function findGeneratedMessageId(client, subject, prefix) {
   const metadata = await client.getMessageMetadata({ Subject: subject }, 0, 10);
   const target = metadata.messages.find((message) => {
@@ -186,13 +194,13 @@ async function findGeneratedMessageId(client, subject, prefix) {
 }
 
 async function assertMessageInLabel(client, messageId, labelId) {
-  const result = await client.getMessageMetadata({ LabelID: labelId }, 0, 20);
-  assert.ok(result.messages.some((message) => message && typeof message === "object" && /** @type {Record<string, unknown>} */ (message).ID === messageId), `message ${messageId} missing label ${labelId}`);
+  const messages = await client.getAllMessageMetadata({ LabelID: labelId });
+  assert.ok(messages.some((message) => message && typeof message === "object" && /** @type {Record<string, unknown>} */ (message).ID === messageId), `message ${messageId} missing label ${labelId}`);
 }
 
 async function assertMessageNotInLabel(client, messageId, labelId) {
-  const result = await client.getMessageMetadata({ LabelID: labelId }, 0, 20);
-  assert.equal(result.messages.some((message) => message && typeof message === "object" && /** @type {Record<string, unknown>} */ (message).ID === messageId), false, `message ${messageId} still has label ${labelId}`);
+  const messages = await client.getAllMessageMetadata({ LabelID: labelId });
+  assert.equal(messages.some((message) => message && typeof message === "object" && /** @type {Record<string, unknown>} */ (message).ID === messageId), false, `message ${messageId} still has label ${labelId}`);
 }
 
 async function ignoreCleanupError(promise) {

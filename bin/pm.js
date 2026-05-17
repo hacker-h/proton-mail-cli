@@ -204,7 +204,9 @@ async function resolveFolderId(client, options) {
   if (matches.length !== 1) {
     throw new Error(matches.length === 0 ? `Folder not found: ${name}` : `Folder name is ambiguous: ${name}`);
   }
-  return String(/** @type {Record<string, unknown>} */ (matches[0]).ID || "");
+  const folderId = String(/** @type {Record<string, unknown>} */ (matches[0]).ID || "").trim();
+  if (!folderId) throw new Error(`Folder has no usable ID: ${name}`);
+  return folderId;
 }
 
 function normalizeActionIds(values) {
