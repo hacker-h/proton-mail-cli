@@ -268,9 +268,36 @@ describe("ProtonMailClient", () => {
     const fetchImpl = mockFetch(200, { Code: 1000, Labels: [{ ID: "l1", Name: "Custom" }] });
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
 
-    const labels = await client.getLabels([1]);
-    assert.equal(labels.length, 1);
+    const labels = await client.getLabels([1, 3]);
+    assert.equal(labels.length, 2);
     assert.equal(labels[0].Name, "Custom");
+    assert.equal(fetchImpl.mock.callCount(), 2);
+    assert.equal(new URL(fetchImpl.mock.calls[0].arguments[0]).searchParams.get("Type"), "1");
+    assert.equal(new URL(fetchImpl.mock.calls[1].arguments[0]).searchParams.get("Type"), "3");
+  });
+
+  it("creates, updates, and deletes labels and folders", async () => {
+    const fetchImpl = mockFetchSequence([
+      { status: 200, body: { Code: 1000, Label: { ID: "label1", Name: "Work", Type: 1 } } },
+      { status: 200, body: { Code: 1000, Label: { ID: "folder1", Name: "Projects", Type: 3 } } },
+      { status: 200, body: { Code: 1000, Label: { ID: "label1", Name: "Renamed", Type: 1 } } },
+      { status: 200, body: { Code: 1000 } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const label = await client.createLabel("Work", "#6d4aff", 1);
+    const folder = await client.createLabel("Projects", "#008a00", 3, "parent1");
+    const renamed = await client.updateLabel("label1", "Renamed", "#111111");
+    await client.deleteLabel("folder1");
+
+    assert.equal(label.ID, "label1");
+    assert.equal(folder.ID, "folder1");
+    assert.equal(renamed.Name, "Renamed");
+    assert.deepEqual(JSON.parse(fetchImpl.mock.calls[0].arguments[1].body), { Name: "Work", Color: "#6d4aff", Type: 1 });
+    assert.deepEqual(JSON.parse(fetchImpl.mock.calls[1].arguments[1].body), { Name: "Projects", Color: "#008a00", Type: 3, ParentID: "parent1" });
+    assert.equal(fetchImpl.mock.calls[2].arguments[1].method, "PUT");
+    assert.deepEqual(JSON.parse(fetchImpl.mock.calls[2].arguments[1].body), { Name: "Renamed", Color: "#111111" });
+    assert.equal(fetchImpl.mock.calls[3].arguments[1].method, "DELETE");
   });
 
   it("throws ApiError on 401", async () => {
@@ -311,6 +338,46 @@ describe("ProtonMailClient", () => {
 
     const result = await client.getMessageCount();
     assert.deepEqual(result, counts);
+  });
+
+  it("fetches conversation lists and individual conversations", async () => {
+    const fetchImpl = mockFetchSequence([
+      { status: 200, body: { Code: 1000, Conversations: [{ ID: "conv1" }], Total: 1 } },
+      { status: 200, body: { Code: 1000, Conversation: { ID: "conv1" } } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const list = await client.getConversations({ LabelID: Labels.INBOX }, 1, 5);
+    const detail = await client.getConversation("conv1");
+
+    assert.deepEqual(list.conversations, [{ ID: "conv1" }]);
+    assert.equal(list.total, 1);
+    const conversation = /** @type {Record<string, unknown>} */ (detail?.Conversation || {});
+    assert.equal(conversation.ID, "conv1");
+    const [listUrl, listOptions] = fetchImpl.mock.calls[0].arguments;
+    assert.ok(listUrl.toString().includes("/mail/v4/conversations"));
+    assert.equal(listOptions.method, "POST");
+    assert.deepEqual(JSON.parse(listOptions.body), { LabelID: Labels.INBOX, Page: 1, PageSize: 5, Sort: "ID" });
+    const [detailUrl, detailOptions] = fetchImpl.mock.calls[1].arguments;
+    assert.ok(detailUrl.toString().includes("/mail/v4/conversations/conv1"));
+    assert.equal(detailOptions.method, "GET");
+  });
+
+  it("fetches latest event id and event stream payloads", async () => {
+    const fetchImpl = mockFetchSequence([
+      { status: 200, body: { Code: 1000, EventID: "event-1" } },
+      { status: 200, body: { Code: 1000, EventID: "event-2", More: 0 } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const eventId = await client.getLatestEventId();
+    const events = await client.getEvents("event-1");
+
+    assert.equal(eventId, "event-1");
+    assert.equal(events?.EventID, "event-2");
+    assert.equal(events?.More, 0);
+    assert.ok(fetchImpl.mock.calls[0].arguments[0].toString().includes("/core/v5/events/latest"));
+    assert.ok(fetchImpl.mock.calls[1].arguments[0].toString().includes("/core/v5/events/event-1"));
   });
 
   it("deleteMessages sends batched PUTs", async () => {
