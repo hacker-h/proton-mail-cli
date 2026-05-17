@@ -2,7 +2,7 @@
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
-import { Labels, MAX_BATCH_IDS } from "../src/constants.js";
+import { Labels, LabelType, MAX_BATCH_IDS } from "../src/constants.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 import { runUpdate, UpdateError } from "../src/update.js";
@@ -177,8 +177,29 @@ async function applyMailActionChunk(client, options, ids) {
   if (options.action === "label") return client.labelMessages(ids, options.labelId);
   if (options.action === "unlabel") return client.unlabelMessages(ids, options.labelId);
   if (options.action === "trash") return client.labelMessages(ids, Labels.TRASH);
+  if (options.action === "archive") return client.archiveMessages(ids);
+  if (options.action === "unarchive") return client.unarchiveMessages(ids);
+  if (options.action === "restore") return client.restoreMessages(ids);
+  if (options.action === "star") return client.starMessages(ids);
+  if (options.action === "unstar") return client.unstarMessages(ids);
+  if (options.action === "spam") return client.markMessagesSpam(ids);
+  if (options.action === "not-spam") return client.markMessagesNotSpam(ids);
+  if (options.action === "move-to-folder") return client.moveMessagesToFolder(ids, await resolveFolderId(client, options));
   if (options.action === "delete") return client.deleteMessages(ids);
   throw new Error(`Unknown mail action: ${options.action}`);
+}
+
+async function resolveFolderId(client, options) {
+  if (options.folderId) return options.folderId;
+  const name = String(options.folderName || "").trim();
+  if (!name) throw new Error("move-to-folder requires --folder-id or --folder");
+
+  const matches = (await client.getLabels([LabelType.FOLDER]))
+    .filter((label) => label && typeof label === "object" && /** @type {Record<string, unknown>} */ (label).Name === name);
+  if (matches.length !== 1) {
+    throw new Error(matches.length === 0 ? `Folder not found: ${name}` : `Folder name is ambiguous: ${name}`);
+  }
+  return String(/** @type {Record<string, unknown>} */ (matches[0]).ID || "");
 }
 
 function normalizeActionIds(values) {

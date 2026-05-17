@@ -18,7 +18,7 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {ClientOptions & { tag: string, repo: string, prefix: string, dryRun: boolean }} UpdateCommandOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
- * @typedef {ClientOptions & { action: string, ids: string[], labelId?: string, fromSearch: boolean, dryRun: boolean, yes: boolean, skipped: unknown[], requested: number, matchText?: string | RegExp, folder?: string, limit?: number, subject?: string, from?: string, to?: string, labelIdFilter?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailActionOptions
+ * @typedef {ClientOptions & { action: string, ids: string[], labelId?: string, folderId?: string, folderName?: string, fromSearch: boolean, dryRun: boolean, yes: boolean, skipped: unknown[], requested: number, matchText?: string | RegExp, folder?: string, limit?: number, subject?: string, from?: string, to?: string, labelIdFilter?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailActionOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
  * @typedef {{ code: string, message: string, details?: unknown }} CliErrorBody
  * @typedef {{ ok: boolean, command: string, data?: unknown, error?: NormalizedCliError | null, version: string }} JsonEnvelopeOptions
@@ -35,7 +35,7 @@ export const CLI_EXIT = Object.freeze({
 
 const DEFAULT_FORMAT = "human";
 const VERSION = readPackageVersion();
-/** @type {Readonly<Record<string, { action: string, requiresLabel?: boolean }>>} */
+/** @type {Readonly<Record<string, { action: string, requiresLabel?: boolean, requiresFolder?: boolean }>>} */
 const MAIL_ACTIONS = Object.freeze({
   "mail:mark-read": Object.freeze({ action: "mark-read" }),
   "mail:mark-unread": Object.freeze({ action: "mark-unread" }),
@@ -43,6 +43,14 @@ const MAIL_ACTIONS = Object.freeze({
   "mail:unlabel": Object.freeze({ action: "unlabel", requiresLabel: true }),
   "mail:trash": Object.freeze({ action: "trash" }),
   "mail:delete": Object.freeze({ action: "delete" }),
+  "mail:archive": Object.freeze({ action: "archive" }),
+  "mail:unarchive": Object.freeze({ action: "unarchive" }),
+  "mail:restore": Object.freeze({ action: "restore" }),
+  "mail:star": Object.freeze({ action: "star" }),
+  "mail:unstar": Object.freeze({ action: "unstar" }),
+  "mail:spam": Object.freeze({ action: "spam" }),
+  "mail:not-spam": Object.freeze({ action: "not-spam" }),
+  "mail:move-to-folder": Object.freeze({ action: "move-to-folder", requiresFolder: true }),
 });
 
 /**
@@ -452,7 +460,7 @@ function parseMailArgs(args, global, commandLabel) {
 /**
  * @param {string[]} args
  * @param {GlobalOptions} global
- * @param {{ action: string, requiresLabel?: boolean }} actionConfig
+ * @param {{ action: string, requiresLabel?: boolean, requiresFolder?: boolean }} actionConfig
  * @param {string} commandLabel
  * @returns {MailActionOptions}
  */
@@ -508,7 +516,13 @@ function parseMailActionArgs(args, global, actionConfig, commandLabel) {
       continue;
     }
     if (option.name === "--folder") {
-      options.folder = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      const value = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      if (actionConfig.requiresFolder) options.folderName = value;
+      else options.folder = value;
+      continue;
+    }
+    if (option.name === "--folder-id") {
+      options.folderId = option.value ?? readCommandOptionValue(args, ++index, option.name);
       continue;
     }
     if (option.name === "--subject") {
@@ -555,6 +569,14 @@ function parseMailActionArgs(args, global, actionConfig, commandLabel) {
 
   if (actionConfig.requiresLabel && !options.labelId) {
     throw new CliError(CLI_EXIT.USAGE, "MISSING_LABEL", `${commandLabel} requires --label <labelId>`);
+  }
+  if (actionConfig.requiresFolder) {
+    if (options.folderId && options.folderName) {
+      throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_FOLDER", `${commandLabel} accepts --folder-id or --folder, not both`);
+    }
+    if (!options.folderId && !options.folderName) {
+      throw new CliError(CLI_EXIT.USAGE, "MISSING_FOLDER", `${commandLabel} requires --folder-id <id> or --folder <name>`);
+    }
   }
   if (options.fromSearch && rawIds.length > 0) {
     throw new CliError(CLI_EXIT.USAGE, "CONFLICTING_SELECTION", `${commandLabel} accepts message IDs or --from-search, not both`);
@@ -820,6 +842,7 @@ function isCommandOptionName(name) {
     "--require-match",
     "--match",
     "--folder",
+    "--folder-id",
     "--label",
     "--label-id",
     "--subject",
@@ -883,6 +906,8 @@ function normalizeMailActionResult(result, options) {
     source: object.source || "unknown",
     action: object.action || options.action,
     labelId: object.labelId || options.labelId || undefined,
+    folderId: object.folderId || options.folderId || undefined,
+    folderName: object.folderName || options.folderName || undefined,
     dryRun: object.dryRun ?? options.dryRun,
     requested: Number(object.requested ?? options.requested ?? 0),
     affected,
@@ -1001,6 +1026,10 @@ Usage:
   pm mail unlabel --label <labelId> <messageId...> [--json]
   pm mail trash <messageId...> [--json]
   pm mail delete <messageId...> [--yes] [--json]
+  pm mail archive|unarchive|restore <messageId...> [--json]
+  pm mail star|unstar <messageId...> [--json]
+  pm mail spam|not-spam <messageId...> [--json]
+  pm mail move-to-folder --folder-id <id> <messageId...> [--json]
   pm update [--tag <tag>] [--prefix <path>] [--json]
   pm doctor config --json
   pm doctor session --json
@@ -1034,6 +1063,8 @@ pm mail action flags:
   --dry-run              Report selected IDs without mutating mail
   --yes                  Confirm a real --from-search mutation
   --label <id>           Label ID for label/unlabel, or search filter for other actions
+  --folder-id <id>       Destination folder ID for move-to-folder
+  --folder <name>        Exact destination folder name for move-to-folder
 
 pm update flags:
   --tag <tag>            Install a specific GitHub Release tag; default latest
