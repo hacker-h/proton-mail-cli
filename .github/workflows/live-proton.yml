@@ -146,6 +146,7 @@ jobs:
           fi
 
       - name: Verify saved session or refresh with live credentials
+        id: live-tests
         env:
           PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
@@ -154,16 +155,8 @@ jobs:
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
         run: pnpm test:live
 
-      - name: Verify installed pm binary against Proton
-        env:
-          PROTONMAIL_LIVE_SESSION_FILE: ${{ env.PROTONMAIL_LIVE_SESSION_FILE }}
-          PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
-          PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
-          PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
-        run: pnpm live:installed
-
       - name: Encrypt refreshed branch session
-        if: success()
+        if: steps.live-tests.outcome == 'success'
         env:
           PROTONMAIL_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY }}
         run: |
@@ -179,3 +172,11 @@ jobs:
         with:
           path: .ci-proton/session.enc
           key: proton-session-${{ steps.session-key.outputs.branch }}-${{ steps.session-key.outputs.bucket }}
+
+      - name: Verify installed pm binary against Proton
+        env:
+          PROTONMAIL_LIVE_SESSION_FILE: ${{ env.PROTONMAIL_LIVE_SESSION_FILE }}
+          PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
+          PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
+          PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
+        run: pnpm live:installed

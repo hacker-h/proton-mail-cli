@@ -31,8 +31,10 @@ export function redact(value) {
 
 export function parsePackOutput(stdout) {
   const jsonStart = stdout.indexOf("[");
+  const jsonEnd = stdout.lastIndexOf("]");
   assert.notEqual(jsonStart, -1, "npm pack did not emit JSON output");
-  const [packed] = JSON.parse(stdout.slice(jsonStart));
+  assert.ok(jsonEnd >= jsonStart, "npm pack JSON output was incomplete");
+  const [packed] = JSON.parse(stdout.slice(jsonStart, jsonEnd + 1));
   assert.ok(packed?.filename, "npm pack should return a tarball filename");
   return String(packed.filename);
 }
@@ -143,65 +145,71 @@ export function assertJsonOk(result, label) {
 export async function runInstalledCliSmoke(options = {}) {
   const root = options.root || ROOT;
   const tempRoot = options.tempRoot || fs.mkdtempSync(path.join(os.tmpdir(), "pm-live-installed-"));
+  const ownsTempRoot = !options.tempRoot;
   const packDir = path.join(tempRoot, "pack");
   const appDir = path.join(tempRoot, "app");
   const homeDir = path.join(tempRoot, "home");
-  fs.mkdirSync(homeDir, { recursive: true });
+  try {
+    fs.mkdirSync(homeDir, { recursive: true });
 
-  const tarball = options.tarball || packCurrentPackage({ root, packDir, run: options.run });
-  const pm = options.pm || installPackage({ tarball, appDir, run: options.run });
-  assertInstalledPmPath(pm, { appDir, root });
+    const tarball = options.tarball || packCurrentPackage({ root, packDir, run: options.run });
+    const pm = options.pm || installPackage({ tarball, appDir, run: options.run });
+    assertInstalledPmPath(pm, { appDir, root });
 
-  const env = buildSmokeEnv({ env: options.env || process.env, homeDir, sessionFile: options.sessionFile, baseDir: root });
+    const env = buildSmokeEnv({ env: options.env || process.env, homeDir, sessionFile: options.sessionFile, baseDir: root });
 
-  const config = runInstalledPmJson(pm, ["doctor", "config"], { env, appDir, run: options.run });
-  assertJsonOk(config, "doctor config");
-  assert.equal(config.command, "doctor:config");
+    const config = runInstalledPmJson(pm, ["doctor", "config"], { env, appDir, run: options.run });
+    assertJsonOk(config, "doctor config");
+    assert.equal(config.command, "doctor:config");
 
-  const session = runInstalledPmJson(pm, ["doctor", "session"], { env, appDir, run: options.run });
-  assertJsonOk(session, "doctor session");
-  assert.equal(session.command, "doctor:session");
-  assert.match(session.data.status, /session_ready|auth_ready/u, redact(JSON.stringify(session.data)));
+    const session = runInstalledPmJson(pm, ["doctor", "session"], { env, appDir, run: options.run });
+    assertJsonOk(session, "doctor session");
+    assert.equal(session.command, "doctor:session");
+    assert.match(session.data.status, /session_ready|auth_ready/u, redact(JSON.stringify(session.data)));
 
-  const list = runInstalledPmJson(pm, ["ls", "--limit", "5"], { env, appDir, run: options.run });
-  assertJsonOk(list, "mail list");
-  assert.equal(list.data.source, "browser");
-  assert.equal(list.data.status, "matched");
-  assert.ok(Array.isArray(list.data.messages));
-  assert.ok(list.data.messages.length > 0, "test account must contain at least one readable message");
+    const list = runInstalledPmJson(pm, ["ls", "--limit", "5"], { env, appDir, run: options.run });
+    assertJsonOk(list, "mail list");
+    assert.equal(list.data.source, "browser");
+    assert.equal(list.data.status, "matched");
+    assert.ok(Array.isArray(list.data.messages));
+    assert.ok(list.data.messages.length > 0, "test account must contain at least one readable message");
 
-  const target = list.data.messages.find((message) => typeof message.ref === "string" && typeof message.preview === "string") || list.data.messages[0];
-  const needle = env.PROTONMAIL_LIVE_READ_MATCH || searchNeedle(target);
-  assert.ok(needle, "installed live smoke needs a searchable preview token");
+    const target = list.data.messages.find((message) => typeof message.ref === "string" && typeof message.preview === "string") || list.data.messages[0];
+    const needle = env.PROTONMAIL_LIVE_READ_MATCH || searchNeedle(target);
+    assert.ok(needle, "installed live smoke needs a searchable preview token");
 
-  const search = runInstalledPmJson(pm, ["mail", "search", "--match", needle, "--limit", "5", "--require-match"], { env, appDir, run: options.run });
-  assertJsonOk(search, "mail search");
-  assert.equal(search.data.source, "browser");
-  assert.equal(search.data.status, "matched");
-  assert.ok(search.data.messages.length > 0);
+    const search = runInstalledPmJson(pm, ["mail", "search", "--match", needle, "--limit", "5", "--require-match"], { env, appDir, run: options.run });
+    assertJsonOk(search, "mail search");
+    assert.equal(search.data.source, "browser");
+    assert.equal(search.data.status, "matched");
+    assert.ok(search.data.messages.length > 0);
 
-  const latest = runInstalledPmJson(pm, ["mail", "latest", "--match", needle, "--require-match"], { env, appDir, run: options.run });
-  assertJsonOk(latest, "mail latest");
-  assert.equal(latest.data.source, "browser");
-  assert.equal(latest.data.status, "matched");
-  assert.equal(typeof latest.data.message.ref, "string");
-  assert.equal(Object.hasOwn(latest.data.message, "bodyText"), false, "latest must not expose body text");
+    const latest = runInstalledPmJson(pm, ["mail", "latest", "--match", needle, "--require-match"], { env, appDir, run: options.run });
+    assertJsonOk(latest, "mail latest");
+    assert.equal(latest.data.source, "browser");
+    assert.equal(latest.data.status, "matched");
+    assert.equal(typeof latest.data.message.ref, "string");
+    assert.ok(latest.data.message.ref.length > 0, "latest ref must be non-empty");
+    assert.equal(Object.hasOwn(latest.data.message, "bodyText"), false, "latest must not expose body text");
 
-  const readRef = latest.data.message.ref || search.data.messages[0].ref;
-  const read = runInstalledPmJson(pm, ["read", readRef], { env, appDir, run: options.run });
-  assertJsonOk(read, "mail read");
-  assert.equal(read.data.source, "browser");
-  assert.equal(read.data.status, "matched");
-  assert.equal(read.data.message.ref, readRef);
-  assert.equal(typeof read.data.message.bodyText, "string");
-  assert.ok(read.data.message.bodyText.trim().length > 0, "read command must return decrypted browser body text");
+    const readRef = latest.data.message.ref;
+    const read = runInstalledPmJson(pm, ["read", readRef], { env, appDir, run: options.run });
+    assertJsonOk(read, "mail read");
+    assert.equal(read.data.source, "browser");
+    assert.equal(read.data.status, "matched");
+    assert.equal(read.data.message.ref, readRef);
+    assert.equal(typeof read.data.message.bodyText, "string");
+    assert.ok(read.data.message.bodyText.trim().length > 0, "read command must return decrypted browser body text");
 
-  return {
-    tarball: path.basename(tarball),
-    appDir,
-    messages: list.data.messages.length,
-    readRef,
-  };
+    return {
+      tarball: path.basename(tarball),
+      appDir,
+      messages: list.data.messages.length,
+      readRef,
+    };
+  } finally {
+    if (ownsTempRoot) fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

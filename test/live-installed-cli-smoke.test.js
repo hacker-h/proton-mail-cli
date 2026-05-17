@@ -24,7 +24,7 @@ after(() => {
 
 describe("installed live CLI smoke helpers", () => {
   it("parses npm pack JSON output", () => {
-    const stdout = "npm notice\n[{\"filename\":\"proton-mail-cli-0.0.0.tgz\"}]\n";
+    const stdout = "npm notice\n[{\"filename\":\"proton-mail-cli-0.0.0.tgz\"}]\ntrailing notice\n";
     assert.equal(parsePackOutput(stdout), "proton-mail-cli-0.0.0.tgz");
   });
 
@@ -140,6 +140,30 @@ describe("installed live CLI smoke helpers", () => {
       ["mail", "latest", "--match", "GitHub", "--require-match"],
       ["read", "browser:index:0"],
     ]);
+  });
+
+  it("cleans up auto-created temp dirs after installed smoke", async () => {
+    let appDir = "";
+    const root = tempDir();
+    const summary = await runInstalledCliSmoke({
+      root,
+      tarball: path.join(os.tmpdir(), "proton-mail-cli-0.0.0.tgz"),
+      sessionFile: path.join(os.tmpdir(), "pm-live-installed-session.json"),
+      env: { PROTONMAIL_LIVE_READ_MATCH: "GitHub" },
+      run: (command, args, options) => {
+        appDir = options.cwd || "";
+        if (command === "npm") {
+          const pm = path.join(appDir, "node_modules", ".bin", process.platform === "win32" ? "pm.cmd" : "pm");
+          fs.mkdirSync(path.dirname(pm), { recursive: true });
+          fs.writeFileSync(pm, "#!/usr/bin/env node\n");
+          return { status: 0, stdout: "", stderr: "" };
+        }
+        return jsonResult(responseFor(args));
+      },
+    });
+
+    assert.equal(summary.readRef, "browser:index:0");
+    assert.equal(fs.existsSync(appDir), false);
   });
 });
 
