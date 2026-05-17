@@ -108,10 +108,9 @@ export function normalizeRepo(value) {
 /** @param {string} packageRoot */
 export function inferInstallPrefix(packageRoot) {
   const normalized = path.resolve(packageRoot);
-  const suffixes = [
-    path.join("lib", "node_modules", PACKAGE_NAME),
-    path.join("node_modules", PACKAGE_NAME),
-  ];
+  const suffixes = process.platform === "win32"
+    ? [path.join("node_modules", PACKAGE_NAME)]
+    : [path.join("lib", "node_modules", PACKAGE_NAME)];
   for (const suffix of suffixes) {
     if (normalized.endsWith(suffix)) return normalized.slice(0, -suffix.length).replace(/[\\/]$/u, "");
   }
@@ -234,7 +233,7 @@ function spawnCommand(command, args) {
 
 /** @param {string} value */
 function quoteWindowsArg(value) {
-  if (!/[\s"&|<>^]/u.test(value)) return value;
+  if (!/[\s"&|<>^%!]/u.test(value)) return value;
   return `"${value.replace(/(\\*)"/gu, '$1$1\\"').replace(/\\+$/u, "$&$&")}"`;
 }
 

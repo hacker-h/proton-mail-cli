@@ -152,6 +152,11 @@ export function parseArgv(argv) {
       continue;
     }
 
+    if (isUpdateCommandPosition(positionals) && (token === "--version" || token.startsWith("--version="))) {
+      positionals.push(token);
+      continue;
+    }
+
     if (token === "--version" || token === "-v") {
       global.version = true;
       continue;
@@ -848,6 +853,11 @@ function parseMatchText(value) {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/** @param {string[]} positionals */
+function isUpdateCommandPosition(positionals) {
+  return positionals[0] === "update" || positionals[0] === "self-update";
 }
 
 /**

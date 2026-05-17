@@ -58,6 +58,7 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
     assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
     assert.deepEqual(parseArgv(["update"]).command, "update");
+    assert.deepEqual(parseArgv(["update", "--version", "2.2.1"]).args, ["--version", "2.2.1"]);
     assert.deepEqual(parseArgv(["self-update"]).command, "update");
     assert.equal(parseArgv(["mail", "mark-read", "msg1"]).command, "mail:mark-read");
 

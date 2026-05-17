@@ -22,6 +22,9 @@ describe("pm update", () => {
 
   it("infers installer prefixes from npm global package paths", () => {
     assert.equal(inferInstallPrefix("/home/user/.local/lib/node_modules/proton-mail-cli"), "/home/user/.local");
+    if (process.platform !== "win32") {
+      assert.equal(inferInstallPrefix("/tmp/app/node_modules/proton-mail-cli"), "");
+    }
     assert.equal(inferInstallPrefix("/repo/proton-mail-cli"), "");
   });
 
@@ -77,6 +80,26 @@ describe("pm update", () => {
       });
 
       assert.equal(result.repo, "owner/repo");
+    });
+  });
+
+  it("fails before installing when release checksums do not match", async () => {
+    const fixture = createReleaseFixture("v2.2.1", "fixture package");
+    fs.writeFileSync(fixture.assets.get("https://download.example.test/SHA256SUMS"), `${"0".repeat(64)}  proton-mail-cli-2.2.1.tgz\n`, "utf8");
+
+    await assert.rejects(() => runUpdate({
+      tag: "latest",
+      prefix: fixture.prefix,
+      packageRoot: fixture.packageRoot,
+      fetchJson: async () => fixture.release,
+      download: async (url, destination) => {
+        fs.copyFileSync(fixture.assets.get(url), destination);
+      },
+      run: () => {
+        throw new Error("install should not run after checksum failure");
+      },
+    }), {
+      code: "CHECKSUM_FAILED",
     });
   });
 
