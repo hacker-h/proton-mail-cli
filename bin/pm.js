@@ -2,7 +2,7 @@
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
-import { Labels, LabelType, MAX_BATCH_IDS } from "../src/constants.js";
+import { Labels, LabelType, MAX_BATCH_IDS, SUCCESS_CODES } from "../src/constants.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 import { runUpdate, UpdateError } from "../src/update.js";
@@ -123,6 +123,8 @@ async function runMailActionFromRest(options) {
       source: "rest",
       action: options.action,
       labelId: options.labelId,
+      folderId: options.folderId,
+      folderName: options.folderName,
       dryRun: true,
       requested: ids.length + skipped.length,
       affected: [],
@@ -133,9 +135,10 @@ async function runMailActionFromRest(options) {
 
   const affected = [];
   const failed = [];
+  const folderId = options.action === "move-to-folder" ? await resolveFolderId(client, options) : undefined;
   for (const chunk of chunks(ids, MAX_BATCH_IDS)) {
     try {
-      const responses = await applyMailActionChunk(client, options, chunk);
+      const responses = await applyMailActionChunk(client, { ...options, folderId }, chunk);
       const upstreamFailures = actionFailuresFromResponses(responses);
       if (upstreamFailures.length > 0) {
         const failedIds = new Set(upstreamFailures.map((failure) => failure.id));
@@ -156,6 +159,8 @@ async function runMailActionFromRest(options) {
     source: "rest",
     action: options.action,
     labelId: options.labelId,
+    folderId,
+    folderName: options.folderName,
     dryRun: false,
     requested: ids.length + skipped.length,
     affected,
@@ -184,7 +189,7 @@ async function applyMailActionChunk(client, options, ids) {
   if (options.action === "unstar") return client.unstarMessages(ids);
   if (options.action === "spam") return client.markMessagesSpam(ids);
   if (options.action === "not-spam") return client.markMessagesNotSpam(ids);
-  if (options.action === "move-to-folder") return client.moveMessagesToFolder(ids, await resolveFolderId(client, options));
+  if (options.action === "move-to-folder") return client.moveMessagesToFolder(ids, options.folderId);
   if (options.action === "delete") return client.deleteMessages(ids);
   throw new Error(`Unknown mail action: ${options.action}`);
 }
@@ -226,7 +231,7 @@ function actionFailuresFromResponses(responses) {
       const id = candidate?.ID || candidate?.id;
       const payload = candidate?.Response || candidate?.response || candidate;
       const code = payload?.Code ?? payload?.code;
-      if (!id || code === undefined || code === 1000) continue;
+      if (!id || code === undefined || SUCCESS_CODES.includes(Number(code))) continue;
       failures.push({
         id: String(id),
         code: String(code),
