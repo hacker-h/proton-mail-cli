@@ -19,12 +19,18 @@ describe("live Proton REST metadata and API smoke", restTestOptions, () => {
     assert.equal(Array.isArray(conversations.conversations), true);
     assert.equal(typeof conversations.total, "number");
 
+    const conversationId = findConversationId(metadata.messages, conversations.conversations);
+    if (conversationId) {
+      const conversation = await client.getConversation(conversationId);
+      assertStableObject(conversation, "conversation payload");
+    }
+
     const eventId = await client.getLatestEventId();
     if (eventId !== undefined) {
       assert.equal(typeof eventId, "string");
       assert.ok(eventId.length > 0);
       const events = await client.getEvents(eventId);
-      assert.ok(events && typeof events === "object", "events endpoint should return an object payload");
+      assertStableObject(events, "events payload");
     }
   });
 
@@ -91,4 +97,62 @@ describe("live Proton REST reversible mutations", restMutationTestOptions, () =>
       if (labelId) await client.deleteLabel(labelId);
     }
   });
+
+  it("observes events after a reversible message mutation", async () => {
+    const client = createRestClient();
+    const prefix = makeLivePrefix("events");
+    const labelName = `${prefix}-label`;
+    assertLivePrefix(labelName, prefix);
+    const metadata = await client.getMessageMetadata({}, 0, 10);
+    const target = metadata.messages.find((message) => message && typeof message === "object" && typeof message.ID === "string");
+    assert.ok(target, "REST event test requires at least one metadata-visible message");
+
+    const message = /** @type {Record<string, unknown>} */ (target);
+    const messageId = String(message.ID);
+    let labelId = "";
+
+    try {
+      const created = await client.createLabel(labelName, "#6d4aff", LabelType.LABEL);
+      assert.ok(created && typeof created === "object", "event test label creation should return a label");
+      labelId = String(/** @type {Record<string, unknown>} */ (created).ID || "");
+      assert.ok(labelId, "event test label must include an ID");
+
+      const eventId = await client.getLatestEventId();
+      assert.equal(typeof eventId, "string");
+      assert.ok(eventId.length > 0);
+
+      await client.labelMessages([messageId], labelId);
+
+      const events = await client.getEvents(eventId);
+      assertStableObject(events, "events after mutation payload");
+    } finally {
+      if (labelId) {
+        try {
+          await client.unlabelMessages([messageId], labelId);
+        } finally {
+          await client.deleteLabel(labelId);
+        }
+      }
+    }
+  });
 });
+
+function findConversationId(messages, conversations) {
+  for (const source of messages) {
+    if (!source || typeof source !== "object") continue;
+    const record = /** @type {Record<string, unknown>} */ (source);
+    const id = record.ConversationID || record.ConversationId;
+    if (typeof id === "string" && id.trim()) return id;
+  }
+  for (const source of conversations) {
+    if (!source || typeof source !== "object") continue;
+    const record = /** @type {Record<string, unknown>} */ (source);
+    const id = record.ID;
+    if (typeof id === "string" && id.trim()) return id;
+  }
+  return "";
+}
+
+function assertStableObject(value, label) {
+  assert.ok(value && typeof value === "object" && !Array.isArray(value), `${label} should be an object`);
+}
