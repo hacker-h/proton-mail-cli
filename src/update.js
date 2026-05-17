@@ -109,12 +109,26 @@ export function normalizeRepo(value) {
 export function inferInstallPrefix(packageRoot) {
   const normalized = path.resolve(packageRoot);
   const suffixes = process.platform === "win32"
-    ? [path.join("node_modules", PACKAGE_NAME)]
-    : [path.join("lib", "node_modules", PACKAGE_NAME)];
+    ? [["node_modules", PACKAGE_NAME]]
+    : [["lib", "node_modules", PACKAGE_NAME]];
   for (const suffix of suffixes) {
-    if (normalized.endsWith(suffix)) return normalized.slice(0, -suffix.length).replace(/[\\/]$/u, "");
+    const prefix = prefixFromPathSegments(normalized, suffix);
+    if (prefix) return prefix;
   }
   return "";
+}
+
+/**
+ * @param {string} value
+ * @param {string[]} suffix
+ */
+function prefixFromPathSegments(value, suffix) {
+  const segments = value.split(path.sep);
+  const actualSuffix = segments.slice(-suffix.length);
+  if (actualSuffix.length !== suffix.length) return "";
+  if (!actualSuffix.every((segment, index) => segment === suffix[index])) return "";
+  const prefix = segments.slice(0, -suffix.length).join(path.sep);
+  return prefix || path.parse(value).root;
 }
 
 /**

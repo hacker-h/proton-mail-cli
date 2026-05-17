@@ -24,6 +24,7 @@ describe("pm update", () => {
     assert.equal(inferInstallPrefix("/home/user/.local/lib/node_modules/proton-mail-cli"), "/home/user/.local");
     if (process.platform !== "win32") {
       assert.equal(inferInstallPrefix("/tmp/app/node_modules/proton-mail-cli"), "");
+      assert.equal(inferInstallPrefix("/tmp/my-lib/node_modules/proton-mail-cli"), "");
     }
     assert.equal(inferInstallPrefix("/repo/proton-mail-cli"), "");
   });
