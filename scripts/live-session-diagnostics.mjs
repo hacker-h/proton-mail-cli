@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
+
 /**
  * @typedef {{
  *   eventName?: string,
@@ -10,6 +12,7 @@
  *   hasSessionCacheKey?: string | boolean,
  *   hasPrimaryCredentials?: string | boolean,
  *   hasSecondaryCredentials?: string | boolean,
+ *   liveTestLog?: string,
  * }} LiveSessionDiagnosticInput
  */
 
@@ -23,15 +26,18 @@ export function resolveLiveSessionDiagnostic(input) {
   const hasPrimaryCredentials = flag(input.hasPrimaryCredentials);
   const hasSecondaryCredentials = flag(input.hasSecondaryCredentials);
   const hasReusableSession = hasSessionJson || hasSessionCache;
+  const liveFailureCategory = classifyLiveTestLog(input.liveTestLog || process.env.LIVE_TEST_LOG || "");
 
   let category = "unknown_live_failure";
   if (outcome === "success") {
     category = "healthy";
+  } else if (liveFailureCategory) {
+    category = liveFailureCategory;
   } else if (!hasReusableSession && !allowFreshLogin) {
     category = "missing_session_json";
   } else if (hasSessionCache && !hasSessionCacheKey && !hasSessionJson && !allowFreshLogin) {
     category = "missing_session_cache_key";
-  } else if (allowFreshLogin && !hasPrimaryCredentials) {
+  } else if (allowFreshLogin && (!hasPrimaryCredentials || !hasSecondaryCredentials)) {
     category = "missing_fresh_login_credentials";
   } else if (!allowFreshLogin && hasReusableSession) {
     category = "expired_or_invalid_saved_session";
@@ -83,6 +89,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     hasSessionCacheKey: process.env.HAS_SESSION_CACHE_KEY,
     hasPrimaryCredentials: process.env.HAS_PRIMARY_CREDENTIALS,
     hasSecondaryCredentials: process.env.HAS_SECONDARY_CREDENTIALS,
+    liveTestLog: process.env.LIVE_TEST_LOG,
   });
 
   if (process.argv.includes("--json")) {
@@ -101,9 +108,13 @@ function actionFor(category) {
     case "missing_session_cache_key":
       return "Configure PROTONMAIL_SESSION_CACHE_KEY, or remove the unusable encrypted cache and seed PROTONMAIL_SESSION_JSON.";
     case "missing_fresh_login_credentials":
-      return "Fresh login was enabled, but PROTONMAIL_USERNAME/PROTONMAIL_PASSWORD were not available to the job.";
+      return "Fresh login was enabled, but one or both test-account credential pairs were not available to the job.";
     case "expired_or_invalid_saved_session":
       return "Refresh PROTONMAIL_SESSION_JSON with the maintainer workflow or a headful local capture.";
+    case "auth_challenge":
+      return "Proton requires CAPTCHA, 2FA, or manual interaction; use headful local capture.";
+    case "selector_or_backend_drift":
+      return "Investigate Proton UI selector drift, backend drift, or a project regression in the redacted live test output.";
     case "auth_challenge_or_backend_drift":
       return "Check live test output: auth_challenge means CAPTCHA/2FA/manual login required; project_or_proton_drift means selector or backend drift.";
     default:
@@ -113,4 +124,12 @@ function actionFor(category) {
 
 function flag(value) {
   return value === true || value === "1" || value === "true" || value === "yes";
+}
+
+function classifyLiveTestLog(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return "";
+  const text = fs.readFileSync(filePath, "utf8");
+  if (/auth_challenge|captcha|twoFactor|manualRequired/u.test(text)) return "auth_challenge";
+  if (/project_or_proton_drift|selector_or_backend_drift/u.test(text)) return "selector_or_backend_drift";
+  return "";
 }

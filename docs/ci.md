@@ -113,8 +113,10 @@ The workflow appends a redacted `Live Proton Session` summary to the GitHub Acti
 | `missing_session_json` | No encrypted cache or `PROTONMAIL_SESSION_JSON` was available, and fresh login was disabled. | Run `Refresh Proton Session Secret`, or capture locally and run `pnpm session:secret`. |
 | `missing_session_cache_key` | An encrypted cache existed but `PROTONMAIL_SESSION_CACHE_KEY` was unavailable. | Configure the cache key or ignore the stale cache and seed `PROTONMAIL_SESSION_JSON`. |
 | `expired_or_invalid_saved_session` | A saved session was present, but Proton no longer accepted it in session-only mode. | Run `Refresh Proton Session Secret`; if Proton challenges automation, use headful local capture. |
-| `missing_fresh_login_credentials` | A maintainer explicitly allowed fresh login, but username/password secrets were missing. | Configure `PROTONMAIL_USERNAME` and `PROTONMAIL_PASSWORD` for the dedicated test account. |
-| `auth_challenge_or_backend_drift` | Fresh login was allowed and credentials were available, but live auth still failed. | Check the redacted test failure: `auth_challenge` means CAPTCHA/2FA/manual login; `project_or_proton_drift` means selector or backend drift. |
+| `missing_fresh_login_credentials` | A maintainer explicitly allowed fresh login, but one or both test-account credential pairs were missing. | Configure `PROTONMAIL_USERNAME`/`PROTONMAIL_PASSWORD` and `PROTONMAIL_USERNAME2`/`PROTONMAIL_PASSWORD2` for the dedicated test accounts. |
+| `auth_challenge` | Proton required CAPTCHA, 2FA, or manual interaction. | Use the headful local capture path; CI must not solve the challenge automatically. |
+| `selector_or_backend_drift` | The redacted live test output reported Proton UI selector drift, backend drift, or a project regression. | Inspect the live test failure and fix the selector/backend assumption or project regression. |
+| `auth_challenge_or_backend_drift` | Fresh login was allowed and credentials were available, but live auth failed before a more specific category could be inferred. | Check the redacted test failure: `auth_challenge` means CAPTCHA/2FA/manual login; `project_or_proton_drift` means selector or backend drift. |
 
 Maintainer workflow refresh:
 

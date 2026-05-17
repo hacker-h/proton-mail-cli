@@ -147,13 +147,16 @@ jobs:
 
       - name: Verify saved session or refresh with live credentials
         id: live-tests
+        shell: bash
         env:
           PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
           PROTONMAIL_USERNAME2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 || '' }}
           PROTONMAIL_PASSWORD2: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD2 || '' }}
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
-        run: pnpm test:live
+        run: |
+          set -o pipefail
+          pnpm test:live 2>&1 | tee .ci-proton/live-test.log
 
       - name: Summarize live session outcome
         if: always()
@@ -166,6 +169,7 @@ jobs:
           HAS_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY != '' && '1' || '0' }}
           HAS_PRIMARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME != '' && secrets.PROTONMAIL_PASSWORD != '' && '1' || '0' }}
           HAS_SECONDARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 != '' && secrets.PROTONMAIL_PASSWORD2 != '' && '1' || '0' }}
+          LIVE_TEST_LOG: .ci-proton/live-test.log
         run: node scripts/live-session-diagnostics.mjs >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Encrypt refreshed branch session

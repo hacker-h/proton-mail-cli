@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { renderLiveSessionSummary, resolveLiveSessionDiagnostic } from "../scripts/live-session-diagnostics.mjs";
 
@@ -34,6 +37,13 @@ describe("live session diagnostics", () => {
       hasSessionCache: "0",
       hasPrimaryCredentials: "0",
     }).category, "missing_fresh_login_credentials");
+
+    assert.equal(resolveLiveSessionDiagnostic({
+      liveTestOutcome: "failure",
+      allowFreshLogin: "1",
+      hasPrimaryCredentials: "1",
+      hasSecondaryCredentials: "0",
+    }).category, "missing_fresh_login_credentials");
   });
 
   it("distinguishes expired saved sessions from auth or backend drift", () => {
@@ -47,6 +57,22 @@ describe("live session diagnostics", () => {
       liveTestOutcome: "failure",
       allowFreshLogin: "1",
       hasPrimaryCredentials: "1",
+      hasSecondaryCredentials: "1",
     }).category, "auth_challenge_or_backend_drift");
+  });
+
+  it("uses redacted live test output to distinguish auth challenges from drift", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pm-live-diagnostics-"));
+    try {
+      const authLog = path.join(directory, "auth.log");
+      const driftLog = path.join(directory, "drift.log");
+      fs.writeFileSync(authLog, '{"category":"auth_challenge","twoFactor":true}\n');
+      fs.writeFileSync(driftLog, '{"category":"project_or_proton_drift"}\n');
+
+      assert.equal(resolveLiveSessionDiagnostic({ liveTestOutcome: "failure", liveTestLog: authLog }).category, "auth_challenge");
+      assert.equal(resolveLiveSessionDiagnostic({ liveTestOutcome: "failure", liveTestLog: driftLog }).category, "selector_or_backend_drift");
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
