@@ -60,6 +60,7 @@ The live test verifies:
 - secondary test-account login when trusted fresh-login secrets are available
 - browser-backed CLI list/search/latest/read behavior
 - REST metadata and safe reversible action behavior when a REST session is configured
+- REST label/folder CLI CRUD with unique prefixed test data when mutation checks are enabled
 - two-account browser UI send/receive behavior for To, Cc, and Bcc recipients
 
 If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
