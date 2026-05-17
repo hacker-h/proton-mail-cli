@@ -36,6 +36,20 @@ Add `$PREFIX/bin` to `PATH` if needed. To uninstall, remove the installed npm pa
 rm -rf "$HOME/.local/lib/node_modules/proton-mail-cli" "$HOME/.local/bin/pm"
 ```
 
+Update an installer-managed install from GitHub Releases:
+
+```bash
+pm update
+pm update --tag v2.2.1
+pm update --version 2.2.1 --json
+```
+
+`pm update` uses the same GitHub Release tarball and `SHA256SUMS` verification path as `install.sh`, then runs the updated `pm --help` before reporting success. It preserves Proton config and session files because those live in the OS config/cache locations, not inside the npm package directory. Source checkouts and other unsupported install modes fail before installing unless you pass an explicit installer prefix:
+
+```bash
+pm update --prefix "$HOME/.local"
+```
+
 ## CLI Usage
 
 This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls`, `pm mail search`, `pm mail latest`, and `pm read browser:index:N` are browser-backed in the installed binary and use saved-session reuse.
@@ -53,6 +67,7 @@ Installed package usage:
 ```bash
 pm --help
 pm version
+pm update --json
 pm ls
 pm ls --match github --limit 5 --json
 pm mail latest
@@ -317,7 +332,7 @@ Update this table whenever support or live coverage changes.
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
 | Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
-| Release installer, update, and checksums | Installer script supported; no self-update command yet | N/A | No | #74, #75, #73 | Installer downloads GitHub Release tarballs, verifies `SHA256SUMS`, and runs `pm --help` after installation. |
+| Release installer, update, and checksums | Installer and `pm update` supported | N/A | No | #74, #75, #73 | Installer/update flows download GitHub Release tarballs, verify `SHA256SUMS`, and run `pm --help` after installation. |
 | Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
 | Draft lifecycle and native REST send | No | No | No | #84, #5 | Blocked by encrypted Proton payload/SRP/key research. Browser UI send coverage is not native REST send support. |
 | Attachment send/decryption | No | No for decryption/send; partial raw download only | No | #88, #95 | Requires native crypto and message decryption work. |
