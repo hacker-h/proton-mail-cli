@@ -119,6 +119,11 @@ describe("installed pm package smoke", () => {
     assert.equal(actionConfirm.status, 1, actionConfirm.stderr);
     assert.equal(actionConfirm.stdout, "");
     assert.equal(JSON.parse(actionConfirm.stderr).error.code, "CONFIRMATION_REQUIRED");
+
+    const moveUsage = run(pm, ["mail", "move-to-folder", "msg1", "--json"], { cwd: appDir, env });
+    assert.equal(moveUsage.status, 1, moveUsage.stderr);
+    assert.equal(moveUsage.stdout, "");
+    assert.equal(JSON.parse(moveUsage.stderr).error.code, "MISSING_FOLDER");
   });
 });
 
