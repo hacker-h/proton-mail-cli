@@ -99,6 +99,17 @@ describe("installed live CLI smoke helpers", () => {
     assert.equal(redact("password=secret words").includes("secret words"), false);
   });
 
+  it("redacts mailbox-derived match terms from command diagnostics", () => {
+    const message = commandError("pm", ["mail", "latest", "--match", "Sensitive reset code", "--require-match"], {
+      status: 1,
+      stdout: "",
+      stderr: "no match",
+    });
+
+    assert.equal(message.includes("Sensitive reset code"), false);
+    assert.match(message, /--match \[redacted\]/u);
+  });
+
   it("selects a stable search needle from message metadata", () => {
     assert.equal(searchNeedle({ subject: "GitHub notification" }), "GitHub notification");
     assert.equal(searchNeedle({ preview: "Hi short LongPreviewToken end" }), "LongPreviewToken");

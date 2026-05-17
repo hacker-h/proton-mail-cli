@@ -83,7 +83,17 @@ export function searchNeedle(message) {
 /** @param {string} command @param {string[]} args @param {CommandResult} result */
 export function commandError(command, args, result) {
   const output = `${result.stdout || ""}${result.stderr || ""}${result.error?.message || ""}`.trim();
-  return `${redact(`${command} ${args.join(" ")}`)} failed with status ${result.status}: ${redact(output)}`;
+  return `${redact(`${command} ${redactCommandArgs(args).join(" ")}`)} failed with status ${result.status}: ${redact(output)}`;
+}
+
+/** @param {string[]} args */
+function redactCommandArgs(args) {
+  return args.map((arg, index) => {
+    if (arg === "--match") return arg;
+    if (args[index - 1] === "--match") return "[redacted]";
+    if (arg.startsWith("--match=")) return "--match=[redacted]";
+    return arg;
+  });
 }
 
 /** @type {CommandRunner} */
