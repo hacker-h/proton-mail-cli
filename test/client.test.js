@@ -286,7 +286,8 @@ describe("ProtonMailClient", () => {
 
     assert.deepEqual(list.conversations, [{ ID: "conv1" }]);
     assert.equal(list.total, 1);
-    assert.equal(detail?.ID, "conv1");
+    const conversation = /** @type {Record<string, unknown>} */ (detail?.Conversation || {});
+    assert.equal(conversation.ID, "conv1");
     const [listUrl, listOptions] = fetchImpl.mock.calls[0].arguments;
     assert.ok(listUrl.toString().includes("/mail/v4/conversations"));
     assert.equal(listOptions.method, "POST");
