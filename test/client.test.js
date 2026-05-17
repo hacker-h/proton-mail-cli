@@ -214,6 +214,45 @@ describe("ProtonMailClient", () => {
     assert.deepEqual(body.IDs, ["m1"]);
   });
 
+  it("mailbox action helpers map to Proton system labels", async () => {
+    const fetchImpl = mockFetch(200, { Code: 1000 });
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    await client.archiveMessages(["m1"]);
+    await client.unarchiveMessages(["m1"]);
+    await client.restoreMessages(["m1"]);
+    await client.starMessages(["m1"]);
+    await client.unstarMessages(["m1"]);
+    await client.markMessagesSpam(["m1"]);
+    await client.markMessagesNotSpam(["m1"]);
+    await client.moveMessagesToFolder(["m1"], "folder1");
+
+    const calls = fetchImpl.mock.calls.map((call) => ({
+      path: call.arguments[0].pathname,
+      body: JSON.parse(call.arguments[1].body),
+    }));
+    assert.deepEqual(calls.map((call) => call.path), [
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/unlabel",
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/label",
+      "/mail/v4/messages/label",
+    ]);
+    assert.deepEqual(calls.map((call) => call.body.LabelID), [
+      Labels.ARCHIVE,
+      Labels.INBOX,
+      Labels.INBOX,
+      Labels.STARRED,
+      Labels.STARRED,
+      Labels.SPAM,
+      Labels.INBOX,
+      "folder1",
+    ]);
+  });
+
 
   it("rejects invalid message mutation IDs before API calls", async () => {
     const fetchImpl = mockFetch(200, { Code: 1000 });

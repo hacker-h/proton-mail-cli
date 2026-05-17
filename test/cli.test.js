@@ -61,6 +61,8 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["update", "--version", "2.2.1"]).args, ["--version", "2.2.1"]);
     assert.deepEqual(parseArgv(["self-update"]).command, "update");
     assert.equal(parseArgv(["mail", "mark-read", "msg1"]).command, "mail:mark-read");
+    assert.equal(parseArgv(["mail", "archive", "msg1"]).command, "mail:archive");
+    assert.equal(parseArgv(["mail", "move-to-folder", "--folder-id", "folder1", "msg1"]).command, "mail:move-to-folder");
     assert.equal(parseArgv(["labels"]).command, "labels:list");
     assert.equal(parseArgv(["labels", "create", "Work"]).command, "labels:create");
     assert.equal(parseArgv(["folders", "delete", "folder1", "--yes"]).command, "folders:delete");
@@ -276,16 +278,46 @@ describe("pm CLI runner", () => {
     const actionIo = createIo();
     const latest = mock.fn(async () => ({ message: { subject: "Latest" } }));
     const read = mock.fn(async (messageId) => ({ message: { id: messageId, subject: "Read", bodyText: "Body" } }));
-    const action = mock.fn(async () => ({ success: true, source: "rest", action: "mark-read", affected: ["msg42"], skipped: [], failed: [] }));
+    const action = mock.fn(async (options) => ({ success: true, source: "rest", action: options.action, affected: ["msg42"], skipped: [], failed: [] }));
 
     assert.equal(await runPmCli({ argv: ["mail", "latest", "--json"], clients: { mail: { latest } }, ...latestIo }), CLI_EXIT.OK);
     assert.equal(await runPmCli({ argv: ["read", "msg42", "--json"], clients: { mail: { read } }, ...readIo }), CLI_EXIT.OK);
     assert.equal(await runPmCli({ argv: ["mail", "mark-read", "msg42", "--json"], clients: { mail: { action } }, ...actionIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "archive", "msg42", "--json"], clients: { mail: { action } }, ...createIo() }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "star", "msg42", "--json"], clients: { mail: { action } }, ...createIo() }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "spam", "msg42", "--json"], clients: { mail: { action } }, ...createIo() }), CLI_EXIT.OK);
 
     assert.equal(JSON.parse(latestIo.stdoutText()).command, "mail:latest");
     assert.equal(JSON.parse(readIo.stdoutText()).data.message.id, "msg42");
     assert.equal(JSON.parse(actionIo.stdoutText()).data.action, "mark-read");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
+  });
+
+  it("passes move-to-folder targets to injected mail actions", async () => {
+    const byId = createIo();
+    const byName = createIo();
+    const conflicting = createIo();
+    const missing = createIo();
+    const action = mock.fn(async (options) => ({
+      success: true,
+      source: "rest",
+      action: options.action,
+      folderId: options.folderId,
+      folderName: options.folderName,
+      affected: options.ids,
+      skipped: [],
+      failed: [],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "move-to-folder", "--folder-id", "folder1", "msg1", "--json"], clients: { mail: { action } }, ...byId }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "move-to-folder", "--folder", "Projects", "msg2", "--json"], clients: { mail: { action } }, ...byName }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["mail", "move-to-folder", "msg3", "--json"], clients: { mail: { action } }, ...missing }), CLI_EXIT.USAGE);
+    assert.equal(await runPmCli({ argv: ["mail", "move-to-folder", "--folder", "Projects", "--folder-id", "folder1", "msg4", "--json"], clients: { mail: { action } }, ...conflicting }), CLI_EXIT.USAGE);
+
+    assert.equal(JSON.parse(byId.stdoutText()).data.folderId, "folder1");
+    assert.equal(JSON.parse(byName.stdoutText()).data.folderName, "Projects");
+    assert.equal(JSON.parse(missing.stderrText()).error.code, "MISSING_FOLDER");
+    assert.equal(JSON.parse(conflicting.stderrText()).error.code, "CONFLICTING_FOLDER");
   });
 
   it("dispatches label and folder CRUD commands with JSON envelopes", async () => {

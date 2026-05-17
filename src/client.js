@@ -1,5 +1,5 @@
 import { ProtonHttp } from "./http.js";
-import { MAX_PAGE_SIZE, MAX_BATCH_IDS } from "./constants.js";
+import { Labels, MAX_PAGE_SIZE, MAX_BATCH_IDS } from "./constants.js";
 
 /**
  * @typedef {import("./http.js").ProtonHttpOptions & { uid?: string | null }} ProtonMailClientOptions
@@ -180,6 +180,49 @@ export class ProtonMailClient {
   async unlabelMessages(messageIds, labelId) {
     validateLabelId(labelId);
     return this.#mutateMessageIds("/mail/v4/messages/unlabel", validateMessageIds(messageIds), labelId);
+  }
+
+  /** @param {string[]} messageIds */
+  async archiveMessages(messageIds) {
+    return this.labelMessages(messageIds, Labels.ARCHIVE);
+  }
+
+  /** @param {string[]} messageIds */
+  async unarchiveMessages(messageIds) {
+    return this.labelMessages(messageIds, Labels.INBOX);
+  }
+
+  /** @param {string[]} messageIds */
+  async restoreMessages(messageIds) {
+    return this.labelMessages(messageIds, Labels.INBOX);
+  }
+
+  /** @param {string[]} messageIds */
+  async starMessages(messageIds) {
+    return this.labelMessages(messageIds, Labels.STARRED);
+  }
+
+  /** @param {string[]} messageIds */
+  async unstarMessages(messageIds) {
+    return this.unlabelMessages(messageIds, Labels.STARRED);
+  }
+
+  /** @param {string[]} messageIds */
+  async markMessagesSpam(messageIds) {
+    return this.labelMessages(messageIds, Labels.SPAM);
+  }
+
+  /** @param {string[]} messageIds */
+  async markMessagesNotSpam(messageIds) {
+    return this.labelMessages(messageIds, Labels.INBOX);
+  }
+
+  /**
+   * @param {string[]} messageIds
+   * @param {string} folderId
+   */
+  async moveMessagesToFolder(messageIds, folderId) {
+    return this.labelMessages(messageIds, folderId);
   }
 
   /**
