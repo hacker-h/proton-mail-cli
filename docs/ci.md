@@ -50,6 +50,9 @@ Local equivalent:
 PROTONMAIL_LIVE_TEST=1 \
 PROTONMAIL_SESSION_JSON="$(cat data/protonmail-auth.json)" \
 pnpm test:live
+
+PROTONMAIL_LIVE_SESSION_FILE="$(pwd)/data/protonmail-auth.json" \
+pnpm live:installed
 ```
 
 The live test verifies:
@@ -61,6 +64,7 @@ The live test verifies:
 - browser-backed CLI list/search/latest/read behavior
 - REST metadata and safe reversible action behavior when a REST session is configured
 - two-account browser UI send/receive behavior for To, Cc, and Bcc recipients
+- the packed, installed `pm` binary from a clean temporary app for doctor/session and read-only list/search/latest/read checks
 
 If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
 

@@ -331,7 +331,7 @@ Update this table whenever support or live coverage changes.
 | Labels and folders CRUD | No dedicated CLI command | Partial: labels list/create/update/delete | No | #85 | Needs safe live CRUD coverage before claiming upstream behavior. |
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
-| Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
+| Installed binary live regression | Yes: packed `pm` binary installed into a clean temp app | N/A | Yes | #91, #76 | Live workflow runs the shipped binary against Proton with the trusted session cache. |
 | Release installer, update, and checksums | Installer and `pm update` supported | N/A | No | #74, #75, #73 | Installer/update flows download GitHub Release tarballs, verify `SHA256SUMS`, and run `pm --help` after installation. |
 | Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
 | Draft lifecycle and native REST send | No | No | No | #84, #5 | Blocked by encrypted Proton payload/SRP/key research. Browser UI send coverage is not native REST send support. |
