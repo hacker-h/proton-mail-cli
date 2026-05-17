@@ -8,6 +8,7 @@ The Proton Calendar `pc` CLI is prior art for short human aliases and automation
 
 - Prefer explicit namespaces for documented commands: `pm mail list`, `pm mail latest`, `pm mail read <messageId>`, `pm doctor config`, `pm doctor session`.
 - Keep human aliases for the most common paths: `pm ls`, `pm list`, `pm inbox`, `pm read <messageId>`, and `pm doctor auth`.
+- Release-management commands may live at the root when they operate on the installed `pm` package itself, such as `pm update` / `pm self-update`.
 - New aliases must be stable, tested, and listed in `pm --help` before they are documented in README.
 - Do not add aliases for destructive commands unless the long form already requires an explicit confirmation flag.
 

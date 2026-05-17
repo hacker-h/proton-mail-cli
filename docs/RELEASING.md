@@ -44,6 +44,8 @@ Releases publish a `SHA256SUMS` asset alongside the package tarball. The release
 
 `install.sh` is the one-line GitHub Release installer documented in `README.md`. It requires Node.js, npm, curl, and POSIX `sh`; defaults to the latest release; accepts `TAG=vX.Y.Z` or `VERSION=X.Y.Z`; installs with `npm install --global --prefix "${PREFIX:-$HOME/.local}"`; verifies `SHA256SUMS` before installation; and runs `pm --help` before reporting success. It must not read Proton credentials, config files, or saved sessions.
 
+`pm update` / `pm self-update` is the matching updater for installer-managed GitHub Release installs. It downloads the selected release tarball and `SHA256SUMS`, verifies the tarball before running `npm install --global --prefix <prefix>`, and then runs the updated `pm --help`. Source checkouts are intentionally unsupported unless an operator supplies `--prefix` for a known installer-managed target.
+
 If this package should be published to npm later:
 
 1. Remove `"private": true` from `package.json`.

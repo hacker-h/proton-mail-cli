@@ -36,6 +36,20 @@ Add `$PREFIX/bin` to `PATH` if needed. To uninstall, remove the installed npm pa
 rm -rf "$HOME/.local/lib/node_modules/proton-mail-cli" "$HOME/.local/bin/pm"
 ```
 
+Update an installer-managed install from GitHub Releases:
+
+```bash
+pm update
+pm update --tag v2.2.1
+pm update --version 2.2.1 --json
+```
+
+`pm update` uses the same GitHub Release tarball and `SHA256SUMS` verification path as `install.sh`, then runs the updated `pm --help` before reporting success. It preserves Proton config and session files because those live in the OS config/cache locations, not inside the npm package directory. Source checkouts and other unsupported install modes fail before installing unless you pass an explicit installer prefix:
+
+```bash
+pm update --prefix "$HOME/.local"
+```
+
 ## CLI Usage
 
 This package installs a `pm` binary for automation-friendly Proton Mail commands. It also exports the underlying client classes for scripts that need direct integration. `pm ls`, `pm mail search`, `pm mail latest`, and `pm read browser:index:N` are browser-backed in the installed binary and use saved-session reuse.
@@ -53,6 +67,7 @@ Installed package usage:
 ```bash
 pm --help
 pm version
+pm update --json
 pm ls
 pm ls --match github --limit 5 --json
 pm mail latest
