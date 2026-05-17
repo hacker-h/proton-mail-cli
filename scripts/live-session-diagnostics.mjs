@@ -26,13 +26,15 @@ export function resolveLiveSessionDiagnostic(input) {
   const hasPrimaryCredentials = flag(input.hasPrimaryCredentials);
   const hasSecondaryCredentials = flag(input.hasSecondaryCredentials);
   const hasReusableSession = hasSessionJson || hasSessionCache;
-  const liveFailureCategory = classifyLiveTestLog(input.liveTestLog || process.env.LIVE_TEST_LOG || "");
+  const liveFailure = classifyLiveTestLog(input.liveTestLog || process.env.LIVE_TEST_LOG || "");
 
   let category = "unknown_live_failure";
   if (outcome === "success") {
     category = "healthy";
-  } else if (liveFailureCategory) {
-    category = liveFailureCategory;
+  } else if (liveFailure === "auth_challenge") {
+    category = liveFailure;
+  } else if (liveFailure === "selector_or_backend_drift") {
+    category = liveFailure;
   } else if (!hasReusableSession && !allowFreshLogin) {
     category = "missing_session_json";
   } else if (hasSessionCache && !hasSessionCacheKey && !hasSessionJson && !allowFreshLogin) {
@@ -130,6 +132,7 @@ function classifyLiveTestLog(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return "";
   const text = fs.readFileSync(filePath, "utf8");
   if (/auth_challenge|captcha|twoFactor|manualRequired/u.test(text)) return "auth_challenge";
+  if (/sessionValid"?\s*:\s*false/u.test(text)) return "";
   if (/project_or_proton_drift|selector_or_backend_drift/u.test(text)) return "selector_or_backend_drift";
   return "";
 }
