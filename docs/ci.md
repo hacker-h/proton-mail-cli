@@ -63,6 +63,7 @@ The live test verifies:
 - secondary test-account login when trusted fresh-login secrets are available
 - browser-backed CLI list/search/latest/read behavior
 - REST metadata and safe reversible action behavior when a REST session is configured
+- REST conversation/event smoke coverage, including event reads after a reversible message mutation when mutation checks are enabled
 - two-account browser UI send/receive behavior for To, Cc, and Bcc recipients
 - the packed, installed `pm` binary from a clean temporary app for doctor/session and read-only list/search/latest/read checks
 

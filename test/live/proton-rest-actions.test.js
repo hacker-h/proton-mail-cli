@@ -19,12 +19,21 @@ describe("live Proton REST metadata and API smoke", restTestOptions, () => {
     assert.equal(Array.isArray(conversations.conversations), true);
     assert.equal(typeof conversations.total, "number");
 
+    const conversationId = findConversationId(metadata.messages, conversations.conversations);
+    if (conversationId) {
+      const detail = await client.getConversation(conversationId);
+      assertStableObject(detail, "conversation payload");
+      const conversation = /** @type {Record<string, unknown>} */ (detail || {}).Conversation;
+      assertStableObject(conversation, "nested conversation payload");
+      assert.equal(/** @type {Record<string, unknown>} */ (conversation).ID, conversationId);
+    }
+
     const eventId = await client.getLatestEventId();
     if (eventId !== undefined) {
       assert.equal(typeof eventId, "string");
       assert.ok(eventId.length > 0);
       const events = await client.getEvents(eventId);
-      assert.ok(events && typeof events === "object", "events endpoint should return an object payload");
+      assertStableObject(events, "events payload");
     }
   });
 
@@ -91,4 +100,91 @@ describe("live Proton REST reversible mutations", restMutationTestOptions, () =>
       if (labelId) await client.deleteLabel(labelId);
     }
   });
+
+  it("observes events after a reversible message mutation", async () => {
+    const client = createRestClient();
+    const prefix = makeLivePrefix("events");
+    const labelName = `${prefix}-label`;
+    assertLivePrefix(labelName, prefix);
+    const metadata = await client.getMessageMetadata({}, 0, 10);
+    const target = metadata.messages.find((message) => message && typeof message === "object" && typeof message.ID === "string");
+    assert.ok(target, "REST event test requires at least one metadata-visible message");
+
+    const message = /** @type {Record<string, unknown>} */ (target);
+    const messageId = String(message.ID);
+    let labelId = "";
+
+    try {
+      const created = await client.createLabel(labelName, "#6d4aff", LabelType.LABEL);
+      assert.ok(created && typeof created === "object", "event test label creation should return a label");
+      labelId = String(/** @type {Record<string, unknown>} */ (created).ID || "");
+      assert.ok(labelId, "event test label must include an ID");
+
+      const eventId = await client.getLatestEventId();
+      assert.equal(typeof eventId, "string");
+      assert.ok(eventId.length > 0);
+
+      await client.labelMessages([messageId], labelId);
+
+      const events = await waitForMutationEvent(client, eventId, messageId, labelId);
+      assertStableObject(events, "events after mutation payload");
+      assert.notEqual(events.EventID, eventId, "event stream should advance after mutation");
+    } finally {
+      if (labelId) {
+        try {
+          await client.unlabelMessages([messageId], labelId);
+        } finally {
+          await client.deleteLabel(labelId);
+        }
+      }
+    }
+  });
 });
+
+function findConversationId(messages, conversations) {
+  for (const source of messages) {
+    if (!source || typeof source !== "object") continue;
+    const record = /** @type {Record<string, unknown>} */ (source);
+    const id = record.ConversationID || record.ConversationId;
+    if (typeof id === "string" && id.trim()) return id;
+  }
+  for (const source of conversations) {
+    if (!source || typeof source !== "object") continue;
+    const record = /** @type {Record<string, unknown>} */ (source);
+    const id = record.ID;
+    if (typeof id === "string" && id.trim()) return id;
+  }
+  return "";
+}
+
+function assertStableObject(value, label) {
+  assert.ok(value && typeof value === "object" && !Array.isArray(value), `${label} should be an object`);
+}
+
+async function waitForMutationEvent(client, eventId, messageId, labelId) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const events = await client.getEvents(eventId);
+    if (hasMutationEvent(events, eventId, messageId, labelId)) return events;
+    await delay(2000);
+  }
+  const events = await client.getEvents(eventId);
+  assert.fail(`event stream did not include mutation for ${messageId}: ${redact(JSON.stringify(events))}`);
+}
+
+function hasMutationEvent(events, previousEventId, messageId, labelId) {
+  if (!events || typeof events !== "object" || Array.isArray(events)) return false;
+  const record = /** @type {Record<string, unknown>} */ (events);
+  if (typeof record.EventID !== "string" || record.EventID === previousEventId) return false;
+  return containsExactValue(record, messageId) || containsExactValue(record, labelId);
+}
+
+function containsExactValue(value, expected) {
+  if (value === expected) return true;
+  if (Array.isArray(value)) return value.some((item) => containsExactValue(item, expected));
+  if (!value || typeof value !== "object") return false;
+  return Object.values(/** @type {Record<string, unknown>} */ (value)).some((item) => containsExactValue(item, expected));
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

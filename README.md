@@ -329,7 +329,7 @@ Update this table whenever support or live coverage changes.
 | Auth/user REST endpoints | No dedicated CLI command | Yes: user/address/key-salt methods | No | #79 | Covered offline by client contract tests; live expansion can be tracked from the feature parity issue. |
 | Attachments download | No dedicated CLI command | Partial: raw attachment bytes through `getAttachment` | No | #88 | Attachment decryption and send are not implemented. |
 | Labels and folders CRUD | No dedicated CLI command | Partial: labels list/create/update/delete | No | #85 | Needs safe live CRUD coverage before claiming upstream behavior. |
-| Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
+| Conversations and events | No dedicated CLI command | Yes: conversation and event methods | Yes | #86 | Live REST smoke covers conversation lists/detail fetch and event stream reads after a reversible mutation when REST mutation tests are enabled. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
 | Installed binary live regression | Yes: packed `pm` binary installed into a clean temp app | N/A | Yes | #91, #76 | Live workflow runs the shipped binary against Proton with the trusted session cache. |
 | Release installer, update, and checksums | Installer and `pm update` supported | N/A | No | #74, #75, #73 | Installer/update flows download GitHub Release tarballs, verify `SHA256SUMS`, and run `pm --help` after installation. |

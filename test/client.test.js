@@ -274,6 +274,46 @@ describe("ProtonMailClient", () => {
     assert.deepEqual(result, counts);
   });
 
+  it("fetches conversation lists and individual conversations", async () => {
+    const fetchImpl = mockFetchSequence([
+      { status: 200, body: { Code: 1000, Conversations: [{ ID: "conv1" }], Total: 1 } },
+      { status: 200, body: { Code: 1000, Conversation: { ID: "conv1" } } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const list = await client.getConversations({ LabelID: Labels.INBOX }, 1, 5);
+    const detail = await client.getConversation("conv1");
+
+    assert.deepEqual(list.conversations, [{ ID: "conv1" }]);
+    assert.equal(list.total, 1);
+    const conversation = /** @type {Record<string, unknown>} */ (detail?.Conversation || {});
+    assert.equal(conversation.ID, "conv1");
+    const [listUrl, listOptions] = fetchImpl.mock.calls[0].arguments;
+    assert.ok(listUrl.toString().includes("/mail/v4/conversations"));
+    assert.equal(listOptions.method, "POST");
+    assert.deepEqual(JSON.parse(listOptions.body), { LabelID: Labels.INBOX, Page: 1, PageSize: 5, Sort: "ID" });
+    const [detailUrl, detailOptions] = fetchImpl.mock.calls[1].arguments;
+    assert.ok(detailUrl.toString().includes("/mail/v4/conversations/conv1"));
+    assert.equal(detailOptions.method, "GET");
+  });
+
+  it("fetches latest event id and event stream payloads", async () => {
+    const fetchImpl = mockFetchSequence([
+      { status: 200, body: { Code: 1000, EventID: "event-1" } },
+      { status: 200, body: { Code: 1000, EventID: "event-2", More: 0 } },
+    ]);
+    const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
+
+    const eventId = await client.getLatestEventId();
+    const events = await client.getEvents("event-1");
+
+    assert.equal(eventId, "event-1");
+    assert.equal(events?.EventID, "event-2");
+    assert.equal(events?.More, 0);
+    assert.ok(fetchImpl.mock.calls[0].arguments[0].toString().includes("/core/v5/events/latest"));
+    assert.ok(fetchImpl.mock.calls[1].arguments[0].toString().includes("/core/v5/events/event-1"));
+  });
+
   it("deleteMessages sends batched PUTs", async () => {
     const fetchImpl = mockFetch(200, { Code: 1000 });
     const client = new ProtonMailClient({ sessionStore: mockSessionStore(), fetchImpl });
