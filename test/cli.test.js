@@ -61,6 +61,9 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["update", "--version", "2.2.1"]).args, ["--version", "2.2.1"]);
     assert.deepEqual(parseArgv(["self-update"]).command, "update");
     assert.equal(parseArgv(["mail", "mark-read", "msg1"]).command, "mail:mark-read");
+    assert.equal(parseArgv(["labels"]).command, "labels:list");
+    assert.equal(parseArgv(["labels", "create", "Work"]).command, "labels:create");
+    assert.equal(parseArgv(["folders", "delete", "folder1", "--yes"]).command, "folders:delete");
 
     const parsed = parseArgv([
       "mail",
@@ -283,6 +286,44 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(readIo.stdoutText()).data.message.id, "msg42");
     assert.equal(JSON.parse(actionIo.stdoutText()).data.action, "mark-read");
     assert.equal(read.mock.calls[0].arguments[0], "msg42");
+  });
+
+  it("dispatches label and folder CRUD commands with JSON envelopes", async () => {
+    const listIo = createIo();
+    const createIoCommand = createIo();
+    const updateIo = createIo();
+    const deleteIo = createIo();
+    const list = mock.fn(async () => ({ success: true, source: "rest", labels: [{ ID: "label1", Name: "Work", Type: 1, Color: "#6d4aff" }] }));
+    const create = mock.fn(async () => ({ success: true, source: "rest", label: { ID: "folder1", Name: "Projects", Type: 3, Color: "#008a00" } }));
+    const update = mock.fn(async () => ({ success: true, source: "rest", label: { ID: "label1", Name: "Renamed", Type: 1, Color: "#6d4aff" } }));
+    const remove = mock.fn(async () => ({ success: true, source: "rest", id: "folder1", deleted: true }));
+
+    assert.equal(await runPmCli({ argv: ["labels", "list", "--json"], clients: { labels: { list } }, ...listIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["folders", "create", "Projects", "--color", "#008a00", "--json"], clients: { labels: { create } }, ...createIoCommand }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["labels", "update", "label1", "Renamed", "--json"], clients: { labels: { update } }, ...updateIo }), CLI_EXIT.OK);
+    assert.equal(await runPmCli({ argv: ["folders", "delete", "folder1", "--yes", "--json"], clients: { labels: { delete: remove } }, ...deleteIo }), CLI_EXIT.OK);
+
+    assert.equal(JSON.parse(listIo.stdoutText()).data.labels[0].entity, "label");
+    assert.equal(create.mock.calls[0].arguments[0].entity, "folder");
+    assert.equal(create.mock.calls[0].arguments[0].name, "Projects");
+    assert.equal(create.mock.calls[0].arguments[0].color, "#008a00");
+    assert.equal(update.mock.calls[0].arguments[0].id, "label1");
+    assert.equal(update.mock.calls[0].arguments[0].name, "Renamed");
+    assert.equal(remove.mock.calls[0].arguments[0].yes, true);
+    assert.equal(JSON.parse(deleteIo.stdoutText()).data.deleted, true);
+  });
+
+  it("validates label and folder command arguments", async () => {
+    const missingName = createIo();
+    const deleteWithoutYes = createIo();
+    const unimplemented = createIo();
+
+    assert.equal(await runPmCli({ argv: ["labels", "create", "--json"], ...missingName }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(missingName.stderrText()).error.code, "MISSING_NAME");
+    assert.equal(await runPmCli({ argv: ["folders", "delete", "folder1", "--json"], ...deleteWithoutYes }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(deleteWithoutYes.stderrText()).error.code, "CONFIRMATION_REQUIRED");
+    assert.equal(await runPmCli({ argv: ["labels", "list", "--json"], ...unimplemented }), CLI_EXIT.UNAVAILABLE);
+    assert.equal(JSON.parse(unimplemented.stderrText()).error.code, "FEATURE_NOT_IMPLEMENTED");
   });
 
   it("passes config, session, and timeout to mail read clients", async () => {

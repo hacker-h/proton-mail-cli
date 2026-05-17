@@ -2,7 +2,7 @@
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
-import { Labels, MAX_BATCH_IDS } from "../src/constants.js";
+import { Labels, LabelType, MAX_BATCH_IDS } from "../src/constants.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 import { runUpdate, UpdateError } from "../src/update.js";
@@ -19,6 +19,12 @@ const exitCode = await runPmCli({
     },
     update: {
       run: runUpdateFromRelease,
+    },
+    labels: {
+      list: listLabelsFromRest,
+      create: createLabelFromRest,
+      update: updateLabelFromRest,
+      delete: deleteLabelFromRest,
     },
   },
 });
@@ -169,6 +175,57 @@ function restClient(options) {
     sessionStore: new FileSessionStore(options.restSessionFile),
     timeoutMs: options.timeout ? options.timeout * 1000 : undefined,
   });
+}
+
+function missingRestLabelResult(options) {
+  return {
+    success: false,
+    status: "rest_session_missing",
+    source: "rest",
+    entity: options.entity,
+    error: `${options.entity} commands require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config`,
+  };
+}
+
+async function listLabelsFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  const labels = await restClient(options).getLabels([labelType(options)]);
+  return { success: true, source: "rest", entity: options.entity, labels };
+}
+
+async function createLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  const label = await restClient(options).createLabel(options.name, options.color || "#6d4aff", labelType(options), options.parentId || undefined);
+  return { success: true, source: "rest", entity: options.entity, action: "create", label };
+}
+
+async function updateLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  const client = restClient(options);
+  const current = await findLabelById(client, options);
+  if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
+  const label = await client.updateLabel(
+    options.id,
+    options.name || current.Name || current.name || "",
+    options.color || current.Color || current.color || "#6d4aff",
+    options.parentId || current.ParentID || current.parentId || undefined
+  );
+  return { success: true, source: "rest", entity: options.entity, action: "update", id: options.id, label };
+}
+
+async function deleteLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  await restClient(options).deleteLabel(options.id);
+  return { success: true, source: "rest", entity: options.entity, action: "delete", id: options.id, deleted: true };
+}
+
+async function findLabelById(client, options) {
+  const labels = await client.getLabels([labelType(options)]);
+  return labels.find((label) => label && typeof label === "object" && String(label.ID || label.id || "") === options.id);
+}
+
+function labelType(options) {
+  return options.entity === "folder" ? LabelType.FOLDER : LabelType.LABEL;
 }
 
 async function applyMailActionChunk(client, options, ids) {
