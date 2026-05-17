@@ -6,6 +6,7 @@ import { MAX_PAGE_SIZE, MAX_BATCH_IDS } from "./constants.js";
  * @typedef {Record<string, unknown>} ProtonFilter
  * @typedef {Record<string, unknown>} ProtonUser
  * @typedef {Record<string, unknown>} ProtonMessage
+ * @typedef {Record<string, unknown>} ProtonConversation
  * @typedef {Record<string, unknown>} ProtonLabel
  * @typedef {{ messages: unknown[], total: number, stale: boolean }} MessageMetadataResult
  * @typedef {{ conversations: unknown[], total: number }} ConversationListResult
@@ -305,13 +306,13 @@ export class ProtonMailClient {
 
   /**
    * @param {string} conversationId
-   * @returns {Promise<import("./http.js").ProtonApiResponse | null>}
+   * @returns {Promise<ProtonConversation | undefined>}
    */
   async getConversation(conversationId) {
     const payload = await this.#http.request("GET", `/mail/v4/conversations/${enc(conversationId)}`, {
       uid: this.#uid,
     });
-    return payload;
+    return payload?.Conversation;
   }
 
   /**

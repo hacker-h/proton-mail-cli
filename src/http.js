@@ -48,6 +48,7 @@ import {
  *   Counts?: unknown[],
  *   Labels?: unknown[],
  *   Label?: Record<string, unknown>,
+ *   Conversation?: Record<string, unknown>,
  *   Conversations?: unknown[],
  *   EventID?: string,
  *   raw?: string,
