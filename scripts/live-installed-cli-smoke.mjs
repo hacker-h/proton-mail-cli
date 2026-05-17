@@ -51,11 +51,13 @@ export function assertInstalledPmPath(pmPath, { appDir, root = ROOT, exists = fs
 export function buildSmokeEnv({ env = process.env, homeDir, sessionFile, baseDir = process.cwd() }) {
   const output = { ...env };
   const resolvedSessionFile = resolveOptionalPath(sessionFile || env.PROTONMAIL_LIVE_SESSION_FILE || "", baseDir);
+  const playwrightBrowsersPath = env.PLAYWRIGHT_BROWSERS_PATH || defaultPlaywrightBrowsersPath(env);
   delete output.NODE_PATH;
   delete output.INIT_CWD;
   output.HOME = homeDir;
   output.XDG_CONFIG_HOME = path.join(homeDir, ".config");
   output.XDG_CACHE_HOME = path.join(homeDir, ".cache");
+  output.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersPath;
   output.PROTONMAIL_CONFIG_FILE = path.join(homeDir, "config.json");
   output.PROTONMAIL_SESSION_FILE = resolvedSessionFile;
   output.PROTONMAIL_LIVE_SESSION_FILE = output.PROTONMAIL_SESSION_FILE;
@@ -223,4 +225,11 @@ function defaultRealpath(filePath) {
 
 function resolveOptionalPath(filePath, baseDir) {
   return filePath ? path.resolve(baseDir, filePath) : "";
+}
+
+function defaultPlaywrightBrowsersPath(env) {
+  const home = env.HOME || os.homedir();
+  if (process.platform === "darwin") return path.join(home, "Library", "Caches", "ms-playwright");
+  if (process.platform === "win32") return path.join(env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "ms-playwright");
+  return path.join(env.XDG_CACHE_HOME || path.join(home, ".cache"), "ms-playwright");
 }

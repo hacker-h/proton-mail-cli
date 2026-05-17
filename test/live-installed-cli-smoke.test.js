@@ -53,6 +53,7 @@ describe("installed live CLI smoke helpers", () => {
         INIT_CWD: "/workspace",
         PROTONMAIL_USERNAME: "owner@example.com",
         PROTONMAIL_LIVE_HEADLESS: "0",
+        PLAYWRIGHT_BROWSERS_PATH: "/runner/cache/ms-playwright",
       },
     });
 
@@ -61,11 +62,26 @@ describe("installed live CLI smoke helpers", () => {
     assert.equal(env.HOME, "/tmp/pm-home");
     assert.equal(env.XDG_CONFIG_HOME, path.join("/tmp/pm-home", ".config"));
     assert.equal(env.XDG_CACHE_HOME, path.join("/tmp/pm-home", ".cache"));
+    assert.equal(env.PLAYWRIGHT_BROWSERS_PATH, "/runner/cache/ms-playwright");
     assert.equal(env.PROTONMAIL_SESSION_FILE, path.join("/tmp/workspace", "session.json"));
     assert.equal(env.PROTONMAIL_LIVE_SESSION_FILE, path.join("/tmp/workspace", "session.json"));
     assert.equal(env.PROTONMAIL_CONFIG_FILE, path.join("/tmp/pm-home", "config.json"));
     assert.equal(env.PROTONMAIL_LIVE_HEADLESS, "0");
     assert.equal(env.PROTONMAIL_USERNAME, "owner@example.com");
+  });
+
+  it("preserves the runner Playwright browser cache outside the isolated home", () => {
+    const env = buildSmokeEnv({
+      homeDir: "/tmp/pm-home",
+      baseDir: "/tmp/workspace",
+      env: {
+        HOME: "/runner/home",
+        XDG_CACHE_HOME: "/runner/xdg-cache",
+      },
+    });
+
+    assert.equal(env.PLAYWRIGHT_BROWSERS_PATH, expectedDefaultPlaywrightBrowsersPath("/runner/home", "/runner/xdg-cache"));
+    assert.equal(env.PLAYWRIGHT_BROWSERS_PATH.startsWith(env.HOME), false);
   });
 
   it("redacts command diagnostics", () => {
@@ -162,4 +178,10 @@ function tempDir() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pm-live-installed-test-"));
   tempDirs.push(directory);
   return directory;
+}
+
+function expectedDefaultPlaywrightBrowsersPath(home, xdgCacheHome) {
+  if (process.platform === "darwin") return path.join(home, "Library", "Caches", "ms-playwright");
+  if (process.platform === "win32") return path.join(home, "AppData", "Local", "ms-playwright");
+  return path.join(xdgCacheHome, "ms-playwright");
 }
