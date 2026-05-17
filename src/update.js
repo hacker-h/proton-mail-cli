@@ -101,9 +101,14 @@ export function normalizeRequestedTag(value) {
 /** @param {string} packageRoot */
 export function inferInstallPrefix(packageRoot) {
   const normalized = path.resolve(packageRoot);
-  const suffix = path.join("lib", "node_modules", PACKAGE_NAME);
-  if (!normalized.endsWith(suffix)) return "";
-  return normalized.slice(0, -suffix.length).replace(/[\\/]$/u, "");
+  const suffixes = [
+    path.join("lib", "node_modules", PACKAGE_NAME),
+    path.join("node_modules", PACKAGE_NAME),
+  ];
+  for (const suffix of suffixes) {
+    if (normalized.endsWith(suffix)) return normalized.slice(0, -suffix.length).replace(/[\\/]$/u, "");
+  }
+  return "";
 }
 
 /**
@@ -198,7 +203,7 @@ function verifyDownloadedSha256Sums(directory, requiredFile) {
  * @param {Runner | undefined} runner
  */
 function runChecked(command, args, runner) {
-  const result = runner ? runner(command, args) : spawnSync(command, args, { encoding: "utf8" });
+  const result = runner ? runner(command, args) : spawnSync(command, args, { encoding: "utf8", shell: process.platform === "win32" });
   const status = result?.status ?? 1;
   if (status === 0) return;
   throw new UpdateError("UPDATE_COMMAND_FAILED", `${command} ${args.join(" ")} failed`, {
@@ -210,7 +215,8 @@ function runChecked(command, args, runner) {
 
 /** @param {string} prefix */
 function pmBin(prefix) {
-  return path.join(prefix, "bin", process.platform === "win32" ? "pm.cmd" : "pm");
+  if (process.platform === "win32") return path.join(prefix, "pm.cmd");
+  return path.join(prefix, "bin", "pm");
 }
 
 function defaultPrefix() {

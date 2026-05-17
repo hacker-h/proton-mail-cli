@@ -260,6 +260,10 @@ async function runUpdateFromRelease(options) {
 function updateStatus(code) {
   if (code === "UNSUPPORTED_INSTALL_MODE") return "unsupported_install_mode";
   if (code === "INVALID_UPDATE_TAG") return "invalid_tag";
-  if (code === "MISSING_CHECKSUMS" || code === "UNSUPPORTED_RELEASE_ASSETS") return "checksum_failed";
+  if (code === "MISSING_CHECKSUMS") return "missing_checksums";
+  if (code === "UNSUPPORTED_RELEASE_ASSETS") return "unsupported_release_assets";
+  if (code === "RELEASE_METADATA_FAILED" || code === "INVALID_RELEASE_METADATA") return "release_metadata_failed";
+  if (code === "UPDATE_COMMAND_FAILED") return "install_failed";
+  if (code === "CHECKSUM_FAILED") return "checksum_failed";
   return "failed";
 }

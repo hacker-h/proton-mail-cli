@@ -53,6 +53,28 @@ describe("pm update", () => {
     assert.equal(result.prefix, fixture.prefix);
   });
 
+  it("uses the repository override environment variable when no repo option is passed", async () => {
+    const fixture = createReleaseFixture("v2.2.1", "fixture package");
+
+    await withEnv({ PROTON_MAIL_CLI_UPDATE_REPO: "owner/repo" }, async () => {
+      const result = await runUpdate({
+        tag: "latest",
+        prefix: fixture.prefix,
+        packageRoot: fixture.packageRoot,
+        dryRun: true,
+        fetchJson: async (url) => {
+          assert.match(url, /api\.github\.com\/repos\/owner\/repo\/releases\/latest$/u);
+          return fixture.release;
+        },
+        download: async (url, destination) => {
+          fs.copyFileSync(fixture.assets.get(url), destination);
+        },
+      });
+
+      assert.equal(result.repo, "owner/repo");
+    });
+  });
+
   it("installs verified release assets into the selected prefix", async () => {
     const fixture = createReleaseFixture("v2.2.1", "fixture package");
     const calls = [];
@@ -109,4 +131,28 @@ function createReleaseFixture(tag, tarballContent) {
       ],
     },
   };
+}
+
+async function withEnv(values, callback) {
+  const previous = {};
+  for (const [key, value] of Object.entries(values)) {
+    previous[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    await callback();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }
