@@ -118,6 +118,8 @@ Default no-match behavior should be a successful empty result when absence is ex
 
 Mail action commands (`pm mail mark-read`, `mark-unread`, `label`, `unlabel`, `trash`, and `delete`) use REST message IDs only. Browser refs such as `browser:index:N` must be rejected before API calls. Selection-based actions must require `--from-search` plus `--dry-run` or `--yes`; no interactive prompt is required for automation-first use. JSON action output must include deterministic `action`, `dryRun`, `requested`, `affected`, `skipped`, and `failed` fields.
 
+Label and folder management commands use explicit namespaces: `pm labels ...` for Proton type `LABEL` and `pm folders ...` for Proton type `FOLDER`. List/create/update/delete commands require a REST session store and must return `REST_SESSION_REQUIRED` when none is configured. Delete commands require `--yes`. Live CRUD tests must generate a unique `pm-` prefix, clean up only labels/folders with that prefix, and use the created LabelID when testing `pm mail label`, `pm mail unlabel`, or `pm ls --label`.
+
 ## Config and Secrets
 
 Configuration resolves in this order:

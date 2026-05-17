@@ -101,6 +101,80 @@ describe("live Proton REST reversible mutations", restMutationTestOptions, () =>
     }
   });
 
+  it("creates, lists, applies, renames, and deletes labels and folders through the CLI", async () => {
+    const client = createRestClient();
+    const env = { PROTONMAIL_REST_SESSION_FILE: process.env.PROTONMAIL_REST_SESSION_FILE || "" };
+    const prefix = makeLivePrefix("labels");
+    const labelName = `${prefix}-label`;
+    const folderName = `${prefix}-folder`;
+    assertLivePrefix(labelName, prefix);
+    assertLivePrefix(folderName, prefix);
+
+    const metadata = await client.getMessageMetadata({}, 0, 10);
+    const target = metadata.messages.find((message) => message && typeof message === "object" && typeof message.ID === "string");
+    assert.ok(target, "label/folder CLI test requires at least one metadata-visible message");
+    const messageId = String(/** @type {Record<string, unknown>} */ (target).ID);
+    let labelId = "";
+    let folderId = "";
+    let labelApplied = false;
+
+    try {
+      const createdLabel = runPmJson(["labels", "create", labelName, "--color", "#6d4aff"], env);
+      assert.equal(createdLabel.ok, true, redact(JSON.stringify(createdLabel.error || createdLabel)));
+      labelId = String(createdLabel.data.label.ID || createdLabel.data.id || "");
+      assert.ok(labelId, "created label must include an ID");
+
+      const createdFolder = runPmJson(["folders", "create", folderName, "--color", "#008a00"], env);
+      assert.equal(createdFolder.ok, true, redact(JSON.stringify(createdFolder.error || createdFolder)));
+      folderId = String(createdFolder.data.label.ID || createdFolder.data.id || "");
+      assert.ok(folderId, "created folder must include an ID");
+
+      const listedLabels = runPmJson(["labels", "list"], env);
+      assert.ok(listedLabels.data.labels.some((label) => label.ID === labelId && label.Name === labelName));
+      const listedFolders = runPmJson(["folders", "list"], env);
+      assert.ok(listedFolders.data.labels.some((folder) => folder.ID === folderId && folder.Name === folderName));
+
+      const apply = runPmJson(["mail", "label", "--label", labelId, messageId], env);
+      assert.equal(apply.ok, true, redact(JSON.stringify(apply.error || apply)));
+      labelApplied = true;
+
+      const filtered = runPmJson(["ls", "--label", labelId, "--limit", "10"], env);
+      assert.equal(filtered.ok, true, redact(JSON.stringify(filtered.error || filtered)));
+      assert.ok(filtered.data.messages.some((message) => message.ID === messageId));
+
+      const renamedLabel = `${prefix}-label-renamed`;
+      const renamedFolder = `${prefix}-folder-renamed`;
+      assertLivePrefix(renamedLabel, prefix);
+      assertLivePrefix(renamedFolder, prefix);
+      const labelUpdate = runPmJson(["labels", "update", labelId, renamedLabel, "--color", "#008a00"], env);
+      assert.equal(labelUpdate.ok, true, redact(JSON.stringify(labelUpdate.error || labelUpdate)));
+      const folderUpdate = runPmJson(["folders", "update", folderId, renamedFolder, "--color", "#6d4aff"], env);
+      assert.equal(folderUpdate.ok, true, redact(JSON.stringify(folderUpdate.error || folderUpdate)));
+
+      const unlabel = runPmJson(["mail", "unlabel", "--label", labelId, messageId], env);
+      assert.equal(unlabel.ok, true, redact(JSON.stringify(unlabel.error || unlabel)));
+      labelApplied = false;
+
+      const deleteLabel = runPmJson(["labels", "delete", labelId, "--yes"], env);
+      assert.equal(deleteLabel.ok, true, redact(JSON.stringify(deleteLabel.error || deleteLabel)));
+      labelId = "";
+      const deleteFolder = runPmJson(["folders", "delete", folderId, "--yes"], env);
+      assert.equal(deleteFolder.ok, true, redact(JSON.stringify(deleteFolder.error || deleteFolder)));
+      folderId = "";
+    } finally {
+      if (labelApplied && labelId) {
+        try {
+          await client.unlabelMessages([messageId], labelId);
+        } finally {
+          await client.deleteLabel(labelId);
+        }
+      } else if (labelId) {
+        await client.deleteLabel(labelId);
+      }
+      if (folderId) await client.deleteLabel(folderId);
+    }
+  });
+
   it("observes events after a reversible message mutation", async () => {
     const client = createRestClient();
     const prefix = makeLivePrefix("events");

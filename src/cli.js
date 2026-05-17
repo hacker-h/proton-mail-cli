@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { doctorConfig, doctorSession, redact, resolveCliConfig } from "./config.js";
+import { LabelType } from "./constants.js";
 import { buildMailMetadataFilter } from "./mail-runner.js";
 
 /**
@@ -12,11 +13,13 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {{ list?: CliHandler, latest?: CliHandler, search?: CliHandler, read?: CliHandler, action?: CliHandler }} CliMailClient
  * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
  * @typedef {{ run?: CliHandler }} CliUpdateClient
- * @typedef {{ mail?: CliMailClient, doctor?: CliDoctorClient, update?: CliUpdateClient }} CliClients
+ * @typedef {{ list?: CliHandler, create?: CliHandler, update?: CliHandler, delete?: CliHandler }} CliLabelsClient
+ * @typedef {{ mail?: CliMailClient, doctor?: CliDoctorClient, update?: CliUpdateClient, labels?: CliLabelsClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
  * @typedef {ClientOptions & { tag: string, repo: string, prefix: string, dryRun: boolean }} UpdateCommandOptions
+ * @typedef {ClientOptions & { entity: "label" | "folder", id: string, name: string, color: string, parentId: string, yes: boolean }} LabelCommandOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
  * @typedef {ClientOptions & { action: string, ids: string[], labelId?: string, fromSearch: boolean, dryRun: boolean, yes: boolean, skipped: unknown[], requested: number, matchText?: string | RegExp, folder?: string, limit?: number, subject?: string, from?: string, to?: string, labelIdFilter?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailActionOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
@@ -42,7 +45,7 @@ const MAIL_ACTIONS = Object.freeze({
   "mail:label": Object.freeze({ action: "label", requiresLabel: true }),
   "mail:unlabel": Object.freeze({ action: "unlabel", requiresLabel: true }),
   "mail:trash": Object.freeze({ action: "trash" }),
-  "mail:delete": Object.freeze({ action: "delete" }),
+  "mail:delete": Object.freeze({ action: "delete", requiresConfirmation: true }),
 });
 
 /**
@@ -271,6 +274,16 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     return { command, data, human: renderMailAction(data) };
   }
 
+  if (isLabelCommand(command)) {
+    const options = parseLabelArgs(command, args, global);
+    const action = command.split(":")[1];
+    const handlers = clients.labels || {};
+    const handler = action === "list" ? handlers.list : action === "create" ? handlers.create : action === "update" ? handlers.update : handlers.delete;
+    const result = await callInjected(handler, [options], `pm ${command.replace(":", " ")}`);
+    const data = action === "list" ? normalizeLabelListResult(result, options) : normalizeLabelMutationResult(result, options, action);
+    return { command, data, human: renderLabels(data) };
+  }
+
   if (command === "doctor:config") {
     const data = doctorConfig(global);
     return { command, data, human: renderDoctor(data) };
@@ -337,6 +350,91 @@ function parseUpdateArgs(args, global) {
   }
 
   return options;
+}
+
+/** @param {string} command */
+function isLabelCommand(command) {
+  return /^(labels|folders):(list|create|update|delete)$/u.test(command);
+}
+
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {GlobalOptions} global
+ * @returns {LabelCommandOptions}
+ */
+function parseLabelArgs(command, args, global) {
+  const [namespace, action] = command.split(":");
+  const entity = namespace === "folders" ? "folder" : "label";
+  /** @type {LabelCommandOptions} */
+  const options = {
+    ...clientOptions(global),
+    entity,
+    id: "",
+    name: "",
+    color: "",
+    parentId: "",
+    yes: false,
+  };
+  const positionals = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token.startsWith("-") || token === "-") {
+      positionals.push(token);
+      continue;
+    }
+
+    const option = splitOption(token);
+    if (option.name === "--name") {
+      options.name = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--color") {
+      options.color = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--parent-id") {
+      options.parentId = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--yes") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--yes does not accept a value", { flag: option.name });
+      options.yes = true;
+      continue;
+    }
+    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
+  }
+
+  if (action === "list") {
+    expectArgs(positionals, 0, `pm ${namespace} list`);
+    return options;
+  }
+  if (action === "create") {
+    if (!options.name && positionals[0]) options.name = positionals[0];
+    expectArgs(positionals, options.name === positionals[0] ? 1 : 0, `pm ${namespace} create <name>`);
+    if (!options.name) throw new CliError(CLI_EXIT.USAGE, "MISSING_NAME", `pm ${namespace} create requires <name> or --name <name>`);
+    return options;
+  }
+  if (action === "update") {
+    if (positionals[0]) options.id = positionals[0];
+    if (positionals[1] && !options.name) options.name = positionals[1];
+    const expectedArgs = options.name && options.name !== positionals[1] ? 1 : positionals[1] ? 2 : 1;
+    expectArgs(positionals, expectedArgs, `pm ${namespace} update <id> [name]`);
+    if (!options.id) throw new CliError(CLI_EXIT.USAGE, "MISSING_ID", `pm ${namespace} update requires <id>`);
+    if (!options.name && !options.color && !options.parentId) {
+      throw new CliError(CLI_EXIT.USAGE, "MISSING_UPDATE", `pm ${namespace} update requires --name, --color, --parent-id, or positional name`);
+    }
+    return options;
+  }
+  if (action === "delete") {
+    if (positionals[0]) options.id = positionals[0];
+    expectArgs(positionals, 1, `pm ${namespace} delete <id>`);
+    if (!options.yes) throw new CliError(CLI_EXIT.USAGE, "CONFIRMATION_REQUIRED", `pm ${namespace} delete requires --yes`);
+    return options;
+  }
+
+  throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_COMMAND", `Unknown command: ${command}`);
 }
 
 /**
@@ -452,7 +550,7 @@ function parseMailArgs(args, global, commandLabel) {
 /**
  * @param {string[]} args
  * @param {GlobalOptions} global
- * @param {{ action: string, requiresLabel?: boolean }} actionConfig
+ * @param {{ action: string, requiresLabel?: boolean, requiresConfirmation?: boolean }} actionConfig
  * @param {string} commandLabel
  * @returns {MailActionOptions}
  */
@@ -582,6 +680,9 @@ function parseMailActionArgs(args, global, actionConfig, commandLabel) {
   }
   if (options.fromSearch && !options.metadataFilter) {
     throw new CliError(CLI_EXIT.USAGE, "MISSING_SEARCH_FILTER", `${commandLabel} --from-search requires at least one REST metadata filter`);
+  }
+  if (actionConfig.requiresConfirmation && !options.dryRun && !options.yes) {
+    throw new CliError(CLI_EXIT.USAGE, "CONFIRMATION_REQUIRED", `${commandLabel} requires --yes or --dry-run`);
   }
 
   const normalized = normalizeMessageIds(rawIds);
@@ -838,6 +939,9 @@ function isCommandOptionName(name) {
     "--version",
     "--repo",
     "--prefix",
+    "--name",
+    "--color",
+    "--parent-id",
   ].includes(name);
 }
 
@@ -890,6 +994,112 @@ function normalizeMailActionResult(result, options) {
     failed,
     ...(error === undefined ? {} : { error }),
   };
+}
+
+/**
+ * @param {unknown} result
+ * @param {LabelCommandOptions} options
+ */
+function normalizeLabelListResult(result, options) {
+  const object = toRecord(result);
+  if (object.success === false) throw labelCommandError(object, options);
+  const labels = sanitizeLabels(Array.isArray(object.labels) ? object.labels : Array.isArray(result) ? result : []);
+  return {
+    ...sanitizeLabelOutput(object),
+    success: object.success ?? true,
+    source: object.source || "unknown",
+    entity: object.entity || options.entity,
+    count: labels.length,
+    labels,
+  };
+}
+
+/**
+ * @param {unknown} result
+ * @param {LabelCommandOptions} options
+ * @param {string} action
+ */
+function normalizeLabelMutationResult(result, options, action) {
+  const object = toRecord(result);
+  if (object.success === false) throw labelCommandError(object, options);
+  const label = sanitizeLabel(object.label || result);
+  return {
+    ...sanitizeLabelOutput(object),
+    success: object.success ?? true,
+    source: object.source || "unknown",
+    entity: object.entity || options.entity,
+    action: object.action || action,
+    id: object.id || label.ID || options.id || undefined,
+    deleted: object.deleted ?? action === "delete",
+    label: Object.keys(label).length > 0 ? label : null,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} object
+ * @param {LabelCommandOptions} options
+ */
+function labelCommandError(object, options) {
+  const status = String(object.status || "failed");
+  const message = String(redact(object.error || labelFailureMessage(status, options.entity)));
+  return new CliError(CLI_EXIT.USAGE, labelFailureCode(status), labelFailureMessage(status, options.entity), { status, error: message });
+}
+
+/** @param {string} status */
+function labelFailureCode(status) {
+  if (status === "rest_session_missing") return "REST_SESSION_REQUIRED";
+  if (status === "session_expired") return "SESSION_EXPIRED";
+  if (status === "auth_error") return "AUTH_REQUIRED";
+  if (status === "not_found") return "LABEL_NOT_FOUND";
+  return "LABEL_COMMAND_FAILED";
+}
+
+/**
+ * @param {string} status
+ * @param {string} entity
+ */
+function labelFailureMessage(status, entity) {
+  if (status === "rest_session_missing") return `${entity} commands require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config`;
+  if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
+  if (status === "auth_error") return "Proton Mail credentials or session are required";
+  if (status === "not_found") return `${entity} was not found`;
+  return `${entity} command failed`;
+}
+
+/** @param {unknown[]} labels */
+function sanitizeLabels(labels) {
+  return labels.map(sanitizeLabel).filter((label) => Object.keys(label).length > 0);
+}
+
+/** @param {unknown} value */
+function sanitizeLabel(value) {
+  const object = toRecord(value);
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const key of ["ID", "Name", "Color", "Type", "ParentID", "Order", "Display", "Notify", "Expanded"]) {
+    if (object[key] !== undefined) output[key] = object[key];
+  }
+  if (output.ID !== undefined) output.id = output.ID;
+  if (output.Name !== undefined) output.name = output.Name;
+  if (output.Color !== undefined) output.color = output.Color;
+  if (output.Type !== undefined) output.entity = Number(output.Type) === LabelType.FOLDER ? "folder" : "label";
+  if (output.ParentID !== undefined) output.parentId = output.ParentID;
+  return output;
+}
+
+/** @param {Record<string, unknown>} object */
+function sanitizeLabelOutput(object) {
+  /** @type {Record<string, unknown>} */
+  const output = {};
+  for (const [key, value] of Object.entries(object)) {
+    if (["labels", "label"].includes(key)) continue;
+    if (key === "error") {
+      output[key] = redact(value);
+      continue;
+    }
+    output[key] = value;
+  }
+  return output;
 }
 
 /** @param {unknown} result */
@@ -957,6 +1167,7 @@ function sanitizeActionFailures(values) {
     const output = { id };
     if (object.reason !== undefined) output.reason = String(redact(object.reason));
     if (object.code !== undefined) output.code = String(redact(object.code));
+    if (object.status !== undefined) output.status = String(redact(object.status));
     if (object.message !== undefined) output.message = String(redact(object.message));
     return output;
   }).filter((value) => value.id);
@@ -1000,7 +1211,12 @@ Usage:
   pm mail label --label <labelId> <messageId...> [--json]
   pm mail unlabel --label <labelId> <messageId...> [--json]
   pm mail trash <messageId...> [--json]
-  pm mail delete <messageId...> [--yes] [--json]
+  pm mail delete <messageId...> --yes [--json]
+  pm labels list [--json]
+  pm labels create <name> [--color <hex>] [--json]
+  pm labels update <id> [name] [--color <hex>] [--json]
+  pm labels delete <id> --yes [--json]
+  pm folders list|create|update|delete ...
   pm update [--tag <tag>] [--prefix <path>] [--json]
   pm doctor config --json
   pm doctor session --json
@@ -1034,6 +1250,12 @@ pm mail action flags:
   --dry-run              Report selected IDs without mutating mail
   --yes                  Confirm a real --from-search mutation
   --label <id>           Label ID for label/unlabel, or search filter for other actions
+
+pm labels/folders flags:
+  --name <name>          Name for create/update; positional name is also accepted
+  --color <hex>          Label/folder color, for example #6d4aff
+  --parent-id <id>       Parent folder ID for folders
+  --yes                  Confirm delete
 
 pm update flags:
   --tag <tag>            Install a specific GitHub Release tag; default latest
@@ -1129,6 +1351,16 @@ function normalizeCommand(positionals) {
   if (first === "update" || first === "self-update") return { command: "update", args: positionals.slice(1) };
   if (["ls", "list", "inbox"].includes(first)) return { command: "mail:list", args: positionals.slice(1) };
   if (first === "read") return { command: "mail:read", args: positionals.slice(1) };
+
+  if (first === "labels" || first === "label") {
+    const action = second || "list";
+    return { command: `labels:${action}`, args: second ? rest : [] };
+  }
+
+  if (first === "folders" || first === "folder") {
+    const action = second || "list";
+    return { command: `folders:${action}`, args: second ? rest : [] };
+  }
 
   if (first === "doctor") {
     if (second === "config") return { command: "doctor:config", args: rest };
@@ -1289,6 +1521,22 @@ function renderMailAction(data) {
   if (object.status === "dry_run") return `Dry run: ${skipped} message(s) selected for ${action}.\n`;
   if (object.status === "partial_failure") return `${action}: ${affected} affected, ${failed} failed, ${skipped} skipped.\n`;
   return `${action}: ${affected} affected, ${skipped} skipped.\n`;
+}
+
+/** @param {unknown} data */
+function renderLabels(data) {
+  const object = toRecord(data);
+  const labels = Array.isArray(object.labels) ? object.labels : [];
+  if (labels.length > 0) {
+    return `${labels.map((label) => {
+      const item = toRecord(label);
+      return `${item.ID || item.id || "<unknown>"}\t${item.entity || object.entity || "label"}\t${item.Name || item.name || "(unnamed)"}`;
+    }).join("\n")}\n`;
+  }
+  const label = toRecord(object.label);
+  if (Object.keys(label).length > 0) return `${label.ID || object.id || "<unknown>"}\t${label.Name || label.name || object.action || "ok"}\n`;
+  if (object.deleted) return `Deleted ${object.entity || "label"} ${object.id || ""}.\n`;
+  return `No ${object.entity || "label"}s.\n`;
 }
 
 /** @param {unknown} data */

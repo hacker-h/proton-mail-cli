@@ -130,6 +130,24 @@ pm mail trash MESSAGE_ID --json
 pm mail delete MESSAGE_ID --yes --json
 ```
 
+Use `pm labels list` and `pm folders list` to discover Proton LabelID values for `pm mail label`, `pm mail unlabel`, and `pm ls --label` filters:
+
+```bash
+pm labels list --json
+pm folders list --json
+pm labels create "Automation" --color "#6d4aff" --json
+pm labels update LABEL_ID "Automation Renamed" --color "#008a00" --json
+pm labels delete LABEL_ID --yes --json
+```
+
+Folders use the same Proton label API but an explicit folder type:
+
+```bash
+pm folders create "Automation Folder" --color "#008a00" --json
+pm folders update FOLDER_ID "Automation Folder Renamed" --json
+pm folders delete FOLDER_ID --yes --json
+```
+
 Selection-based actions are gated. Use `--from-search` with REST metadata filters and either `--dry-run` or `--yes`:
 
 ```bash
@@ -328,7 +346,7 @@ Update this table whenever support or live coverage changes.
 | REST mail actions | Yes: mark read/unread, label/unlabel, trash/delete by stable message ID | Yes: message mutation methods | Partial | #78 | Default live CI avoids destructive actions; opt-in reversible mutation checks use test-prefixed labels. |
 | Auth/user REST endpoints | No dedicated CLI command | Yes: user/address/key-salt methods | No | #79 | Covered offline by client contract tests; live expansion can be tracked from the feature parity issue. |
 | Attachments download | No dedicated CLI command | Partial: raw attachment bytes through `getAttachment` | No | #88 | Attachment decryption and send are not implemented. |
-| Labels and folders CRUD | No dedicated CLI command | Partial: labels list/create/update/delete | No | #85 | Needs safe live CRUD coverage before claiming upstream behavior. |
+| Labels and folders CRUD | Yes: `pm labels ...` and `pm folders ...` list/create/update/delete | Yes: labels list/create/update/delete | Yes | #85 | Live mutation smoke creates prefixed labels/folders, applies a label to a message, filters by LabelID, renames, deletes, and cleans up only prefixed test data. |
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | Yes | #86 | Live REST smoke covers conversation lists/detail fetch and event stream reads after a reversible mutation when REST mutation tests are enabled. |
 | Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
 | Installed binary live regression | Yes: packed `pm` binary installed into a clean temp app | N/A | Yes | #91, #76 | Live workflow runs the shipped binary against Proton with the trusted session cache. |

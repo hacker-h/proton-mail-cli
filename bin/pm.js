@@ -2,7 +2,8 @@
 import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
-import { Labels, MAX_BATCH_IDS } from "../src/constants.js";
+import { Labels, LabelType, MAX_BATCH_IDS } from "../src/constants.js";
+import { ApiError } from "../src/errors.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 import { runUpdate, UpdateError } from "../src/update.js";
@@ -19,6 +20,12 @@ const exitCode = await runPmCli({
     },
     update: {
       run: runUpdateFromRelease,
+    },
+    labels: {
+      list: listLabelsFromRest,
+      create: createLabelFromRest,
+      update: updateLabelFromRest,
+      delete: deleteLabelFromRest,
     },
   },
 });
@@ -146,13 +153,16 @@ async function runMailActionFromRest(options) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      failed.push(...chunk.map((id) => ({ id, code: "MAIL_ACTION_FAILED", message })));
+      const code = error instanceof ApiError ? error.code : "MAIL_ACTION_FAILED";
+      const status = error instanceof ApiError ? error.status : undefined;
+      failed.push(...chunk.map((id) => ({ id, code, status, message })));
     }
   }
 
+  const status = mailActionStatus(affected, failed);
   return {
-    success: failed.length === 0,
-    status: failed.length > 0 ? "partial_failure" : "applied",
+    success: status === "applied",
+    status,
     source: "rest",
     action: options.action,
     labelId: options.labelId,
@@ -169,6 +179,108 @@ function restClient(options) {
     sessionStore: new FileSessionStore(options.restSessionFile),
     timeoutMs: options.timeout ? options.timeout * 1000 : undefined,
   });
+}
+
+function missingRestLabelResult(options) {
+  return {
+    success: false,
+    status: "rest_session_missing",
+    source: "rest",
+    entity: options.entity,
+    error: `${options.entity} commands require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config`,
+  };
+}
+
+async function listLabelsFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  try {
+    const labels = await restClient(options).getLabels([labelType(options)]);
+    return { success: true, source: "rest", entity: options.entity, labels };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
+}
+
+async function createLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  try {
+    const label = await restClient(options).createLabel(options.name, options.color || "#6d4aff", labelType(options), options.parentId || undefined);
+    return { success: true, source: "rest", entity: options.entity, action: "create", label };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
+}
+
+async function updateLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  try {
+    const client = restClient(options);
+    const current = await findLabelById(client, options);
+    if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
+    const label = await client.updateLabel(
+      options.id,
+      options.name || current.Name || current.name || "",
+      options.color || current.Color || current.color || "#6d4aff",
+      options.parentId || current.ParentID || current.parentId || undefined
+    );
+    return { success: true, source: "rest", entity: options.entity, action: "update", id: options.id, label };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
+}
+
+async function deleteLabelFromRest(options) {
+  if (!options.restSessionFile) return missingRestLabelResult(options);
+  try {
+    const client = restClient(options);
+    const current = await findLabelById(client, options);
+    if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
+    await client.deleteLabel(options.id);
+    return { success: true, source: "rest", entity: options.entity, action: "delete", id: options.id, deleted: true };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
+}
+
+function mailActionStatus(affected, failed) {
+  if (failed.length === 0) return "applied";
+  if (affected.length === 0 && failed.every(isSessionExpiredFailure)) return "session_expired";
+  return "partial_failure";
+}
+
+function isSessionExpiredFailure(failure) {
+  return failure?.code === "AUTH_EXPIRED" || failure?.code === "SESSION_EXPIRED";
+}
+
+function restLabelFailure(error, options) {
+  return {
+    success: false,
+    status: restFailureStatus(error),
+    source: "rest",
+    entity: options.entity,
+    id: options.id || undefined,
+    sessionExpired: isSessionExpired(error),
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function restFailureStatus(error) {
+  if (isSessionExpired(error)) return "session_expired";
+  if (error instanceof ApiError && error.status === 401) return "auth_error";
+  return "upstream_failure";
+}
+
+function isSessionExpired(error) {
+  return error instanceof ApiError && (error.code === "AUTH_EXPIRED" || error.code === "SESSION_EXPIRED");
+}
+
+async function findLabelById(client, options) {
+  const labels = await client.getLabels([labelType(options)]);
+  return labels.find((label) => label && typeof label === "object" && String(label.ID || label.id || "") === options.id);
+}
+
+function labelType(options) {
+  return options.entity === "folder" ? LabelType.FOLDER : LabelType.LABEL;
 }
 
 async function applyMailActionChunk(client, options, ids) {

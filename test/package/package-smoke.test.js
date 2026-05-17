@@ -105,6 +105,11 @@ describe("installed pm package smoke", () => {
     assert.equal(restSessionUsage.stdout, "");
     assert.equal(JSON.parse(restSessionUsage.stderr).error.code, "REST_SESSION_REQUIRED");
 
+    const labelSessionUsage = run(pm, ["labels", "list", "--json"], { cwd: appDir, env });
+    assert.equal(labelSessionUsage.status, 1, labelSessionUsage.stderr);
+    assert.equal(labelSessionUsage.stdout, "");
+    assert.equal(JSON.parse(labelSessionUsage.stderr).error.code, "REST_SESSION_REQUIRED");
+
     const searchUsage = run(pm, ["mail", "search", "--json"], { cwd: appDir, env });
     assert.equal(searchUsage.status, 1, searchUsage.stderr);
     assert.equal(searchUsage.stdout, "");
