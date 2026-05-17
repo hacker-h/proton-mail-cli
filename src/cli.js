@@ -1167,6 +1167,7 @@ function sanitizeActionFailures(values) {
     const output = { id };
     if (object.reason !== undefined) output.reason = String(redact(object.reason));
     if (object.code !== undefined) output.code = String(redact(object.code));
+    if (object.status !== undefined) output.status = String(redact(object.status));
     if (object.message !== undefined) output.message = String(redact(object.message));
     return output;
   }).filter((value) => value.id);

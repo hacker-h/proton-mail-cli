@@ -615,7 +615,7 @@ describe("pm CLI runner", () => {
       action: "trash",
       affected: ["msg1"],
       skipped: [],
-      failed: [{ id: "msg2", code: "MAIL_ACTION_FAILED", message: "user@example.com password=abc" }],
+      failed: [{ id: "msg2", code: "MAIL_ACTION_FAILED", status: 502, message: "user@example.com password=abc" }],
     }));
 
     assert.equal(await runPmCli({ argv: ["mail", "trash", "msg1", "msg2", "--json"], clients: { mail: { action } }, ...io }), CLI_EXIT.OK);
@@ -624,7 +624,27 @@ describe("pm CLI runner", () => {
     assert.equal(envelope.data.status, "partial_failure");
     assert.deepEqual(envelope.data.affected, ["msg1"]);
     assert.equal(envelope.data.failed[0].id, "msg2");
+    assert.equal(envelope.data.failed[0].status, "502");
     assert.equal(envelopeText.includes("user@example.com"), false);
+    assert.equal(envelopeText.includes("abc"), false);
+  });
+
+  it("returns stable failures when mail actions hit expired REST sessions", async () => {
+    const io = createIo();
+    const action = mock.fn(async () => ({
+      success: false,
+      status: "session_expired",
+      source: "rest",
+      action: "mark-read",
+      requested: 1,
+      affected: [],
+      skipped: [],
+      failed: [{ id: "msg1", code: "AUTH_EXPIRED", status: 401, message: "expired token=abc" }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "msg1", "--json"], clients: { mail: { action } }, ...io }), CLI_EXIT.USAGE);
+    const envelopeText = io.stderrText();
+    assert.equal(JSON.parse(envelopeText).error.code, "SESSION_EXPIRED");
     assert.equal(envelopeText.includes("abc"), false);
   });
 

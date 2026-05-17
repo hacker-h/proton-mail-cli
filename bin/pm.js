@@ -159,9 +159,10 @@ async function runMailActionFromRest(options) {
     }
   }
 
+  const status = mailActionStatus(affected, failed);
   return {
-    success: failed.length === 0,
-    status: failed.length > 0 ? "partial_failure" : "applied",
+    success: status === "applied",
+    status,
     source: "rest",
     action: options.action,
     labelId: options.labelId,
@@ -231,11 +232,24 @@ async function updateLabelFromRest(options) {
 async function deleteLabelFromRest(options) {
   if (!options.restSessionFile) return missingRestLabelResult(options);
   try {
-    await restClient(options).deleteLabel(options.id);
+    const client = restClient(options);
+    const current = await findLabelById(client, options);
+    if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
+    await client.deleteLabel(options.id);
     return { success: true, source: "rest", entity: options.entity, action: "delete", id: options.id, deleted: true };
   } catch (error) {
     return restLabelFailure(error, options);
   }
+}
+
+function mailActionStatus(affected, failed) {
+  if (failed.length === 0) return "applied";
+  if (affected.length === 0 && failed.every(isSessionExpiredFailure)) return "session_expired";
+  return "partial_failure";
+}
+
+function isSessionExpiredFailure(failure) {
+  return failure?.code === "AUTH_EXPIRED" || failure?.code === "SESSION_EXPIRED" || failure?.status === 401 || failure?.status === 403;
 }
 
 function restLabelFailure(error, options) {
