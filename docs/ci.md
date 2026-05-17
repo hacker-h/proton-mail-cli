@@ -66,9 +66,9 @@ The live test verifies:
 - two-account browser UI send/receive behavior for To, Cc, and Bcc recipients
 - the packed, installed `pm` binary from a clean temporary app for doctor/session and read-only list/search/latest/read checks
 
-If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted CI falls back to the dedicated test-account username/password and saves a refreshed session.
+If `PROTONMAIL_SESSION_JSON` is present, the test writes it to an isolated temporary session file before launching the browser. The first live step then verifies that saved session by navigating to Proton Mail. If direct mailbox navigation is redirected, the browser client also tries Proton's public login/SSO path before using credentials. If Proton still does not accept the saved session, trusted non-scheduled CI falls back to the dedicated test-account username/password and saves a refreshed session.
 
-Trusted owner, Dependabot, and scheduled runs may perform fresh username/password login when the seeded or cached session is missing or expired. Fresh login should still be treated as potentially causing Proton CAPTCHA, 2FA/TOTP, or other risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
+Trusted owner and Dependabot runs may perform fresh username/password login when the seeded or cached session is missing or expired. Scheduled runs are session-only by default: they may restore the encrypted cache or use `PROTONMAIL_SESSION_JSON`, but they do not receive username/password credentials. Maintainers can explicitly opt into credential refresh with the manual live workflow input or the dedicated `Refresh Proton Session Secret` workflow. Fresh login should still be treated as potentially causing Proton CAPTCHA, 2FA/TOTP, or other risk challenges. If Proton returns the structured `twoFactor`/`manualRequired` result, the fix is to refresh the saved session in a headful/manual run; CI must not try to solve 2FA/TOTP automatically.
 
 ## Live Test Data Safety
 
@@ -89,9 +89,9 @@ Cache behavior:
 - cache contents: encrypted minimized Playwright storage state
 - encryption: AES-256-GCM via `PROTONMAIL_SESSION_CACHE_KEY`
 - fallback: `PROTONMAIL_SESSION_JSON` when no cache exists for the current branch/bucket
-- fresh password login: enabled for trusted owner-launched runs, scheduled runs, owner same-repository PRs, and Dependabot PRs
+- fresh password login: enabled for trusted owner-launched runs, owner same-repository PRs, and Dependabot PRs; disabled for scheduled runs unless a maintainer starts a manual refresh
 
-The exact cache bucket is intentionally short-lived, but the restore fallback lets scheduled CI try the newest encrypted session for the same branch before falling back to repository secrets or username/password refresh. If the restored encrypted cache cannot be decrypted or parsed, CI treats it as stale/corrupt, removes it from the workspace, and falls back to `PROTONMAIL_SESSION_JSON` or trusted fresh login. Successful runs save a refreshed encrypted session for the current six-hour bucket.
+The exact cache bucket is intentionally short-lived, but the restore fallback lets scheduled CI try the newest encrypted session for the same branch before falling back to repository secrets. If the restored encrypted cache cannot be decrypted or parsed, CI treats it as stale/corrupt, removes it from the workspace, and falls back to `PROTONMAIL_SESSION_JSON` or trusted non-scheduled fresh login. Successful runs save a refreshed encrypted session for the current six-hour bucket.
 
 Do not cache raw session JSON. The workflow only caches `.ci-proton/session.enc`.
 
@@ -99,16 +99,37 @@ Dependabot live-login coverage uses Dependabot-scoped secrets with the same name
 
 ## Proactive Session Refresh
 
-For scheduled CI, the `Proton login and session reuse` job is the session health check. It restores the encrypted branch cache or seeds `PROTONMAIL_SESSION_JSON`, verifies that saved browser state reaches Proton Mail directly or through Proton's login/SSO forward path, and automatically performs username/password login with the dedicated test account if the saved session no longer works.
+For scheduled CI, the `Proton login and session reuse` job is the session health check. It restores the encrypted branch cache or seeds `PROTONMAIL_SESSION_JSON`, then verifies that saved browser state reaches Proton Mail directly or through Proton's login/SSO forward path. Scheduled CI is intentionally session-only; it reports an actionable failure instead of receiving username/password credentials by default.
 
 Expected scheduled behavior:
 
 - use the dedicated Proton test account only
 - try saved browser state first
 - try Proton's login/SSO forward path before filling credentials
-- fall back to `PROTONMAIL_USERNAME`/`PROTONMAIL_PASSWORD` only in trusted contexts
+- do not receive `PROTONMAIL_USERNAME`/`PROTONMAIL_PASSWORD` on schedule
 - write refreshed Playwright storage state to the encrypted six-hour Actions cache
 - never print the session JSON, cookies, refresh payloads, or full account address
+
+The workflow appends a redacted `Live Proton Session` summary to the GitHub Actions job. Use the category to decide the operator action:
+
+| Category | Meaning | Operator action |
+|---|---|---|
+| `missing_session_json` | No encrypted cache or `PROTONMAIL_SESSION_JSON` was available, and fresh login was disabled. | Run `Refresh Proton Session Secret`, or capture locally and run `pnpm session:secret`. |
+| `missing_session_cache_key` | An encrypted cache existed but `PROTONMAIL_SESSION_CACHE_KEY` was unavailable. | Configure the cache key or ignore the stale cache and seed `PROTONMAIL_SESSION_JSON`. |
+| `expired_or_invalid_saved_session` | A saved session was present, but Proton no longer accepted it in session-only mode. | Run `Refresh Proton Session Secret`; if Proton challenges automation, use headful local capture. |
+| `missing_fresh_login_credentials` | A maintainer explicitly allowed fresh login, but one or both test-account credential pairs were missing. | Configure `PROTONMAIL_USERNAME`/`PROTONMAIL_PASSWORD` and `PROTONMAIL_USERNAME2`/`PROTONMAIL_PASSWORD2` for the dedicated test accounts. |
+| `auth_challenge` | Proton required CAPTCHA, 2FA, or manual interaction. | Use the headful local capture path; CI must not solve the challenge automatically. |
+| `selector_or_backend_drift` | The redacted live test output reported Proton UI selector drift, backend drift, or a project regression. | Inspect the live test failure and fix the selector/backend assumption or project regression. |
+| `auth_challenge_or_backend_drift` | Fresh login was allowed and credentials were available, but live auth failed before a more specific category could be inferred. | Check the redacted test failure: `auth_challenge` means CAPTCHA/2FA/manual login; `project_or_proton_drift` means selector or backend drift. |
+
+Maintainer workflow refresh:
+
+1. Configure `SESSION_SECRET_ROTATION_TOKEN` as a fine-scoped token that can update Actions secrets in this repository.
+2. Confirm `PROTONMAIL_USERNAME` and `PROTONMAIL_PASSWORD` are set for the dedicated test account.
+3. Run the `Refresh Proton Session Secret` workflow from GitHub Actions.
+4. Re-run the scheduled/live regression after the secret refresh completes.
+
+The refresh workflow performs a headless username/password login, stores only minimized Playwright storage state as `PROTONMAIL_SESSION_JSON`, and never prints the session contents. If Proton requires CAPTCHA, 2FA, or manual interaction, the workflow fails with an actionable message and the operator must use the headful local capture path below.
 
 Local refresh recipe:
 

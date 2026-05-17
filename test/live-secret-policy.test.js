@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { resolveLiveSecretPolicy } from "../scripts/live-secret-policy.mjs";
 
 describe("live Proton secret policy", () => {
-  it("allows scheduled CI to refresh expired sessions with stored credentials", () => {
+  it("keeps scheduled CI session-only by default", () => {
     assert.deepEqual(resolveLiveSecretPolicy({
       eventName: "schedule",
       actor: "hacker-h",
@@ -12,7 +12,7 @@ describe("live Proton secret policy", () => {
       repository: "hacker-h/proton-mail-cli",
     }), {
       trusted: true,
-      allowFreshLogin: true,
+      allowFreshLogin: false,
     });
   });
 
