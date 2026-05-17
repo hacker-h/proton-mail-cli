@@ -326,6 +326,21 @@ describe("pm CLI runner", () => {
     assert.equal(JSON.parse(unimplemented.stderrText()).error.code, "FEATURE_NOT_IMPLEMENTED");
   });
 
+  it("normalizes label command failures", async () => {
+    const expired = createIo();
+    const ambiguous = createIo();
+    const list = mock.fn(async () => ({ success: false, status: "session_expired", error: "Expired user@example.com token=abc" }));
+
+    assert.equal(await runPmCli({ argv: ["labels", "list", "--json"], clients: { labels: { list } }, ...expired }), CLI_EXIT.USAGE);
+    const expiredText = expired.stderrText();
+    assert.equal(JSON.parse(expiredText).error.code, "SESSION_EXPIRED");
+    assert.equal(expiredText.includes("user@example.com"), false);
+    assert.equal(expiredText.includes("abc"), false);
+
+    assert.equal(await runPmCli({ argv: ["labels", "update", "label1", "Old", "--name", "New", "--json"], ...ambiguous }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(ambiguous.stderrText()).error.code, "UNEXPECTED_ARGUMENT");
+  });
+
   it("passes config, session, and timeout to mail read clients", async () => {
     const io = createIo();
     const read = mock.fn(async (messageId) => ({ message: { id: messageId, subject: "Read", bodyText: "Body" } }));
@@ -565,6 +580,7 @@ describe("pm CLI runner", () => {
 
   it("requires confirmation or dry-run for selection-based mail actions", async () => {
     const missing = createIo();
+    const directDelete = createIo();
     const dryRun = createIo();
     const action = mock.fn(async (options) => ({
       success: true,
@@ -579,6 +595,9 @@ describe("pm CLI runner", () => {
 
     assert.equal(await runPmCli({ argv: ["mail", "mark-read", "--from-search", "--subject", "Invoice", "--json"], clients: { mail: { action } }, ...missing }), CLI_EXIT.USAGE);
     assert.equal(JSON.parse(missing.stderrText()).error.code, "CONFIRMATION_REQUIRED");
+
+    assert.equal(await runPmCli({ argv: ["mail", "delete", "msg1", "--json"], clients: { mail: { action } }, ...directDelete }), CLI_EXIT.USAGE);
+    assert.equal(JSON.parse(directDelete.stderrText()).error.code, "CONFIRMATION_REQUIRED");
 
     assert.equal(await runPmCli({ argv: ["mail", "mark-read", "--from-search", "--subject", "Invoice", "--dry-run", "--json"], clients: { mail: { action } }, ...dryRun }), CLI_EXIT.OK);
     const options = action.mock.calls[0].arguments[0];

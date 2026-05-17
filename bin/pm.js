@@ -3,6 +3,7 @@ import { ProtonMailBrowserClient } from "../src/browser-client.js";
 import { ProtonMailClient } from "../src/client.js";
 import { runPmCli } from "../src/cli.js";
 import { Labels, LabelType, MAX_BATCH_IDS } from "../src/constants.js";
+import { ApiError } from "../src/errors.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
 import { runUpdate, UpdateError } from "../src/update.js";
@@ -152,7 +153,9 @@ async function runMailActionFromRest(options) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      failed.push(...chunk.map((id) => ({ id, code: "MAIL_ACTION_FAILED", message })));
+      const code = error instanceof ApiError ? error.code : "MAIL_ACTION_FAILED";
+      const status = error instanceof ApiError ? error.status : undefined;
+      failed.push(...chunk.map((id) => ({ id, code, status, message })));
     }
   }
 
@@ -189,34 +192,72 @@ function missingRestLabelResult(options) {
 
 async function listLabelsFromRest(options) {
   if (!options.restSessionFile) return missingRestLabelResult(options);
-  const labels = await restClient(options).getLabels([labelType(options)]);
-  return { success: true, source: "rest", entity: options.entity, labels };
+  try {
+    const labels = await restClient(options).getLabels([labelType(options)]);
+    return { success: true, source: "rest", entity: options.entity, labels };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
 }
 
 async function createLabelFromRest(options) {
   if (!options.restSessionFile) return missingRestLabelResult(options);
-  const label = await restClient(options).createLabel(options.name, options.color || "#6d4aff", labelType(options), options.parentId || undefined);
-  return { success: true, source: "rest", entity: options.entity, action: "create", label };
+  try {
+    const label = await restClient(options).createLabel(options.name, options.color || "#6d4aff", labelType(options), options.parentId || undefined);
+    return { success: true, source: "rest", entity: options.entity, action: "create", label };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
 }
 
 async function updateLabelFromRest(options) {
   if (!options.restSessionFile) return missingRestLabelResult(options);
-  const client = restClient(options);
-  const current = await findLabelById(client, options);
-  if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
-  const label = await client.updateLabel(
-    options.id,
-    options.name || current.Name || current.name || "",
-    options.color || current.Color || current.color || "#6d4aff",
-    options.parentId || current.ParentID || current.parentId || undefined
-  );
-  return { success: true, source: "rest", entity: options.entity, action: "update", id: options.id, label };
+  try {
+    const client = restClient(options);
+    const current = await findLabelById(client, options);
+    if (!current) return { success: false, status: "not_found", source: "rest", entity: options.entity, id: options.id, error: `${options.entity} was not found` };
+    const label = await client.updateLabel(
+      options.id,
+      options.name || current.Name || current.name || "",
+      options.color || current.Color || current.color || "#6d4aff",
+      options.parentId || current.ParentID || current.parentId || undefined
+    );
+    return { success: true, source: "rest", entity: options.entity, action: "update", id: options.id, label };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
 }
 
 async function deleteLabelFromRest(options) {
   if (!options.restSessionFile) return missingRestLabelResult(options);
-  await restClient(options).deleteLabel(options.id);
-  return { success: true, source: "rest", entity: options.entity, action: "delete", id: options.id, deleted: true };
+  try {
+    await restClient(options).deleteLabel(options.id);
+    return { success: true, source: "rest", entity: options.entity, action: "delete", id: options.id, deleted: true };
+  } catch (error) {
+    return restLabelFailure(error, options);
+  }
+}
+
+function restLabelFailure(error, options) {
+  return {
+    success: false,
+    status: restFailureStatus(error),
+    source: "rest",
+    entity: options.entity,
+    id: options.id || undefined,
+    sessionExpired: isSessionExpired(error),
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function restFailureStatus(error) {
+  if (isSessionExpired(error)) return "session_expired";
+  if (error instanceof ApiError && error.status === 401) return "auth_error";
+  return "upstream_failure";
+}
+
+function isSessionExpired(error) {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.code === "AUTH_EXPIRED" || error.code === "SESSION_EXPIRED");
 }
 
 async function findLabelById(client, options) {

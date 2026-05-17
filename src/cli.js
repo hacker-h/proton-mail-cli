@@ -45,7 +45,7 @@ const MAIL_ACTIONS = Object.freeze({
   "mail:label": Object.freeze({ action: "label", requiresLabel: true }),
   "mail:unlabel": Object.freeze({ action: "unlabel", requiresLabel: true }),
   "mail:trash": Object.freeze({ action: "trash" }),
-  "mail:delete": Object.freeze({ action: "delete" }),
+  "mail:delete": Object.freeze({ action: "delete", requiresConfirmation: true }),
 });
 
 /**
@@ -419,7 +419,8 @@ function parseLabelArgs(command, args, global) {
   if (action === "update") {
     if (positionals[0]) options.id = positionals[0];
     if (positionals[1] && !options.name) options.name = positionals[1];
-    expectArgs(positionals, positionals[1] ? 2 : 1, `pm ${namespace} update <id> [name]`);
+    const expectedArgs = options.name && options.name !== positionals[1] ? 1 : positionals[1] ? 2 : 1;
+    expectArgs(positionals, expectedArgs, `pm ${namespace} update <id> [name]`);
     if (!options.id) throw new CliError(CLI_EXIT.USAGE, "MISSING_ID", `pm ${namespace} update requires <id>`);
     if (!options.name && !options.color && !options.parentId) {
       throw new CliError(CLI_EXIT.USAGE, "MISSING_UPDATE", `pm ${namespace} update requires --name, --color, --parent-id, or positional name`);
@@ -549,7 +550,7 @@ function parseMailArgs(args, global, commandLabel) {
 /**
  * @param {string[]} args
  * @param {GlobalOptions} global
- * @param {{ action: string, requiresLabel?: boolean }} actionConfig
+ * @param {{ action: string, requiresLabel?: boolean, requiresConfirmation?: boolean }} actionConfig
  * @param {string} commandLabel
  * @returns {MailActionOptions}
  */
@@ -679,6 +680,9 @@ function parseMailActionArgs(args, global, actionConfig, commandLabel) {
   }
   if (options.fromSearch && !options.metadataFilter) {
     throw new CliError(CLI_EXIT.USAGE, "MISSING_SEARCH_FILTER", `${commandLabel} --from-search requires at least one REST metadata filter`);
+  }
+  if (actionConfig.requiresConfirmation && !options.dryRun && !options.yes) {
+    throw new CliError(CLI_EXIT.USAGE, "CONFIRMATION_REQUIRED", `${commandLabel} requires --yes or --dry-run`);
   }
 
   const normalized = normalizeMessageIds(rawIds);
@@ -1044,6 +1048,8 @@ function labelCommandError(object, options) {
 /** @param {string} status */
 function labelFailureCode(status) {
   if (status === "rest_session_missing") return "REST_SESSION_REQUIRED";
+  if (status === "session_expired") return "SESSION_EXPIRED";
+  if (status === "auth_error") return "AUTH_REQUIRED";
   if (status === "not_found") return "LABEL_NOT_FOUND";
   return "LABEL_COMMAND_FAILED";
 }
@@ -1054,6 +1060,8 @@ function labelFailureCode(status) {
  */
 function labelFailureMessage(status, entity) {
   if (status === "rest_session_missing") return `${entity} commands require PROTONMAIL_REST_SESSION_FILE or restSessionFile in config`;
+  if (status === "session_expired") return "Saved Proton Mail session expired; refresh the session file";
+  if (status === "auth_error") return "Proton Mail credentials or session are required";
   if (status === "not_found") return `${entity} was not found`;
   return `${entity} command failed`;
 }
