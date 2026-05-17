@@ -175,8 +175,14 @@ function hasMutationEvent(events, previousEventId, messageId, labelId) {
   if (!events || typeof events !== "object" || Array.isArray(events)) return false;
   const record = /** @type {Record<string, unknown>} */ (events);
   if (typeof record.EventID !== "string" || record.EventID === previousEventId) return false;
-  const serialized = JSON.stringify(record);
-  return serialized.includes(messageId) || serialized.includes(labelId);
+  return containsExactValue(record, messageId) || containsExactValue(record, labelId);
+}
+
+function containsExactValue(value, expected) {
+  if (value === expected) return true;
+  if (Array.isArray(value)) return value.some((item) => containsExactValue(item, expected));
+  if (!value || typeof value !== "object") return false;
+  return Object.values(/** @type {Record<string, unknown>} */ (value)).some((item) => containsExactValue(item, expected));
 }
 
 function delay(ms) {
