@@ -146,6 +146,7 @@ jobs:
           fi
 
       - name: Verify saved session or refresh with live credentials
+        id: live-tests
         env:
           PROTONMAIL_USERNAME: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME || '' }}
           PROTONMAIL_PASSWORD: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_PASSWORD || '' }}
@@ -154,8 +155,21 @@ jobs:
           PROTONMAIL_ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
         run: pnpm test:live
 
+      - name: Summarize live session outcome
+        if: always()
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LIVE_TEST_OUTCOME: ${{ steps.live-tests.outcome || 'skipped' }}
+          ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
+          HAS_SESSION_JSON: ${{ secrets.PROTONMAIL_SESSION_JSON != '' && '1' || '0' }}
+          HAS_SESSION_CACHE: ${{ steps.restore-session.outputs.cache-hit == 'true' && '1' || '0' }}
+          HAS_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY != '' && '1' || '0' }}
+          HAS_PRIMARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME != '' && secrets.PROTONMAIL_PASSWORD != '' && '1' || '0' }}
+          HAS_SECONDARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 != '' && secrets.PROTONMAIL_PASSWORD2 != '' && '1' || '0' }}
+        run: node scripts/live-session-diagnostics.mjs >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Encrypt refreshed branch session
-        if: success()
+        if: steps.live-tests.outcome == 'success'
         env:
           PROTONMAIL_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY }}
         run: |
@@ -166,7 +180,7 @@ jobs:
           pnpm session:cache -- encrypt --input "${PROTONMAIL_LIVE_SESSION_FILE}" --output .ci-proton/session.enc
 
       - name: Save 6-hour branch session cache
-        if: success() && steps.restore-session.outputs.cache-hit != 'true' && hashFiles('.ci-proton/session.enc') != ''
+        if: steps.live-tests.outcome == 'success' && steps.restore-session.outputs.cache-hit != 'true' && hashFiles('.ci-proton/session.enc') != ''
         uses: actions/cache/save@v5
         with:
           path: .ci-proton/session.enc
