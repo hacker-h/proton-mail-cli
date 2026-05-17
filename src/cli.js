@@ -1211,7 +1211,7 @@ Usage:
   pm mail label --label <labelId> <messageId...> [--json]
   pm mail unlabel --label <labelId> <messageId...> [--json]
   pm mail trash <messageId...> [--json]
-  pm mail delete <messageId...> [--yes] [--json]
+  pm mail delete <messageId...> --yes [--json]
   pm labels list [--json]
   pm labels create <name> [--color <hex>] [--json]
   pm labels update <id> [name] [--color <hex>] [--json]

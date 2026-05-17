@@ -648,6 +648,25 @@ describe("pm CLI runner", () => {
     assert.equal(envelopeText.includes("abc"), false);
   });
 
+  it("does not classify plain forbidden mail action failures as expired sessions", async () => {
+    const io = createIo();
+    const action = mock.fn(async () => ({
+      success: false,
+      status: "partial_failure",
+      source: "rest",
+      action: "mark-read",
+      requested: 1,
+      affected: [],
+      skipped: [],
+      failed: [{ id: "msg1", code: "UPSTREAM_ERROR", status: 403, message: "Forbidden" }],
+    }));
+
+    assert.equal(await runPmCli({ argv: ["mail", "mark-read", "msg1", "--json"], clients: { mail: { action } }, ...io }), CLI_EXIT.OK);
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.data.status, "partial_failure");
+    assert.equal(envelope.data.failed[0].status, "403");
+  });
+
 
   it("normalizes upstream partial mail action responses", async () => {
     const io = createIo();

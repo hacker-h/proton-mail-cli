@@ -249,7 +249,7 @@ function mailActionStatus(affected, failed) {
 }
 
 function isSessionExpiredFailure(failure) {
-  return failure?.code === "AUTH_EXPIRED" || failure?.code === "SESSION_EXPIRED" || failure?.status === 401 || failure?.status === 403;
+  return failure?.code === "AUTH_EXPIRED" || failure?.code === "SESSION_EXPIRED";
 }
 
 function restLabelFailure(error, options) {
@@ -271,7 +271,7 @@ function restFailureStatus(error) {
 }
 
 function isSessionExpired(error) {
-  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.code === "AUTH_EXPIRED" || error.code === "SESSION_EXPIRED");
+  return error instanceof ApiError && (error.code === "AUTH_EXPIRED" || error.code === "SESSION_EXPIRED");
 }
 
 async function findLabelById(client, options) {
