@@ -166,7 +166,7 @@ jobs:
           LIVE_TEST_OUTCOME: ${{ steps.live-tests.outcome }}
           ALLOW_FRESH_LOGIN: ${{ steps.secret-policy.outputs.allow_fresh_login }}
           HAS_SESSION_JSON: ${{ secrets.PROTONMAIL_SESSION_JSON != '' && '1' || '0' }}
-          HAS_SESSION_CACHE: ${{ steps.restore-session.outputs.cache-hit == 'true' && '1' || '0' }}
+          HAS_SESSION_CACHE: ${{ hashFiles('.ci-proton/session.enc') != '' && '1' || '0' }}
           HAS_SESSION_CACHE_KEY: ${{ secrets.PROTONMAIL_SESSION_CACHE_KEY != '' && '1' || '0' }}
           HAS_PRIMARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME != '' && secrets.PROTONMAIL_PASSWORD != '' && '1' || '0' }}
           HAS_SECONDARY_CREDENTIALS: ${{ steps.secret-policy.outputs.allow_fresh_login == '1' && secrets.PROTONMAIL_USERNAME2 != '' && secrets.PROTONMAIL_PASSWORD2 != '' && '1' || '0' }}
