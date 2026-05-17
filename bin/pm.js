@@ -5,6 +5,7 @@ import { runPmCli } from "../src/cli.js";
 import { Labels, MAX_BATCH_IDS } from "../src/constants.js";
 import { filterMailMessages, parseBrowserMessageRef } from "../src/mail-runner.js";
 import { FileSessionStore } from "../src/rest-session-store.js";
+import { runUpdate, UpdateError } from "../src/update.js";
 
 const exitCode = await runPmCli({
   argv: process.argv.slice(2),
@@ -15,6 +16,9 @@ const exitCode = await runPmCli({
       search: searchMailFromBrowser,
       read: readMailFromBrowser,
       action: runMailActionFromRest,
+    },
+    update: {
+      run: runUpdateFromRelease,
     },
   },
 });
@@ -236,4 +240,26 @@ function browserOptions(options) {
     folder: options.folder,
     limit: options.limit,
   };
+}
+
+async function runUpdateFromRelease(options) {
+  try {
+    return await runUpdate(options);
+  } catch (error) {
+    if (error instanceof UpdateError) {
+      return {
+        success: false,
+        status: updateStatus(error.code),
+        error: error.message,
+      };
+    }
+    throw error;
+  }
+}
+
+function updateStatus(code) {
+  if (code === "UNSUPPORTED_INSTALL_MODE") return "unsupported_install_mode";
+  if (code === "INVALID_UPDATE_TAG") return "invalid_tag";
+  if (code === "MISSING_CHECKSUMS" || code === "UNSUPPORTED_RELEASE_ASSETS") return "checksum_failed";
+  return "failed";
 }

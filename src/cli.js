@@ -11,10 +11,12 @@ import { buildMailMetadataFilter } from "./mail-runner.js";
  * @typedef {(...args: unknown[]) => unknown | Promise<unknown>} CliHandler
  * @typedef {{ list?: CliHandler, latest?: CliHandler, search?: CliHandler, read?: CliHandler, action?: CliHandler }} CliMailClient
  * @typedef {{ session?: CliHandler, auth?: CliHandler }} CliDoctorClient
- * @typedef {{ mail?: CliMailClient, doctor?: CliDoctorClient }} CliClients
+ * @typedef {{ run?: CliHandler }} CliUpdateClient
+ * @typedef {{ mail?: CliMailClient, doctor?: CliDoctorClient, update?: CliUpdateClient }} CliClients
  * @typedef {{ argv?: string[], stdout?: WritableLike, stderr?: WritableLike, version?: string, clients?: CliClients }} CliRunOptions
  * @typedef {{ command: string, data: unknown, human: string }} CommandResult
  * @typedef {{ timeout: number | null, config: string, session: string, restSessionFile: string, quiet: boolean, verbose: boolean, format: CliFormat }} ClientOptions
+ * @typedef {ClientOptions & { tag: string, repo: string, prefix: string, dryRun: boolean }} UpdateCommandOptions
  * @typedef {ClientOptions & { matchText?: string | RegExp, folder?: string, limit?: number, requireMatch?: boolean, subject?: string, from?: string, to?: string, labelId?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailCommandOptions
  * @typedef {ClientOptions & { action: string, ids: string[], labelId?: string, fromSearch: boolean, dryRun: boolean, yes: boolean, skipped: unknown[], requested: number, matchText?: string | RegExp, folder?: string, limit?: number, subject?: string, from?: string, to?: string, labelIdFilter?: string, unread?: boolean, read?: boolean, after?: number, before?: number, metadataFilter?: Record<string, unknown> }} MailActionOptions
  * @typedef {{ exitCode: number, code: string, message: string, details?: unknown }} NormalizedCliError
@@ -274,10 +276,62 @@ export async function dispatchCommand({ command, args, global, clients = {} }) {
     return { command, data, human: renderDoctor(data) };
   }
 
+  if (command === "update") {
+    const options = parseUpdateArgs(args, global);
+    const result = await callInjected(clients.update?.run, [options], "pm update");
+    const data = normalizeUpdateResult(result);
+    return { command, data, human: renderUpdate(data) };
+  }
+
   throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_COMMAND", `Unknown command: ${formatCommand(command, args)}`, {
     command,
     args,
   });
+}
+
+/**
+ * @param {string[]} args
+ * @param {GlobalOptions} global
+ * @returns {UpdateCommandOptions}
+ */
+function parseUpdateArgs(args, global) {
+  /** @type {UpdateCommandOptions} */
+  const options = {
+    ...clientOptions(global),
+    tag: "latest",
+    repo: "hacker-h/proton-mail-cli",
+    prefix: "",
+    dryRun: false,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (!token.startsWith("-") || token === "-") {
+      throw new CliError(CLI_EXIT.USAGE, "UNEXPECTED_ARGUMENT", "pm update does not accept positional arguments", { args });
+    }
+
+    const option = splitOption(token);
+    if (option.name === "--tag" || option.name === "--version") {
+      options.tag = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--repo") {
+      options.repo = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--prefix") {
+      options.prefix = option.value ?? readCommandOptionValue(args, ++index, option.name);
+      continue;
+    }
+    if (option.name === "--dry-run") {
+      if (option.value !== undefined) throw new CliError(CLI_EXIT.USAGE, "INVALID_FLAG_VALUE", "--dry-run does not accept a value", { flag: option.name });
+      options.dryRun = true;
+      continue;
+    }
+    throw new CliError(CLI_EXIT.USAGE, "UNKNOWN_FLAG", `Unknown flag: ${token}`, { flag: token });
+  }
+
+  return options;
 }
 
 /**
@@ -775,6 +829,10 @@ function isCommandOptionName(name) {
     "--dry-run",
     "--yes",
     "--from-search",
+    "--tag",
+    "--version",
+    "--repo",
+    "--prefix",
   ].includes(name);
 }
 
@@ -822,6 +880,45 @@ function normalizeMailActionResult(result, options) {
     failed,
     ...(error === undefined ? {} : { error }),
   };
+}
+
+/** @param {unknown} result */
+function normalizeUpdateResult(result) {
+  const object = toRecord(result);
+  if (object.success === false) {
+    const status = String(object.status || "failed");
+    throw new CliError(CLI_EXIT.RUNTIME, updateFailureCode(status), updateFailureMessage(status), {
+      status,
+      error: redact(object.error || updateFailureMessage(status)),
+    });
+  }
+  return {
+    success: object.success ?? true,
+    status: object.status || "updated",
+    repo: object.repo,
+    tag: object.tag,
+    requestedTag: object.requestedTag,
+    prefix: object.prefix,
+    asset: object.asset,
+    pm: object.pm,
+    dryRun: object.dryRun ?? false,
+  };
+}
+
+/** @param {string} status */
+function updateFailureCode(status) {
+  if (status === "unsupported_install_mode") return "UNSUPPORTED_INSTALL_MODE";
+  if (status === "invalid_tag") return "INVALID_UPDATE_TAG";
+  if (status === "checksum_failed") return "CHECKSUM_FAILED";
+  return "UPDATE_FAILED";
+}
+
+/** @param {string} status */
+function updateFailureMessage(status) {
+  if (status === "unsupported_install_mode") return "pm update is only supported for installer-managed GitHub Release installs";
+  if (status === "invalid_tag") return "--tag/--version must be latest, vX.Y.Z, or X.Y.Z";
+  if (status === "checksum_failed") return "Downloaded release checksum verification failed";
+  return "pm update failed";
 }
 
 /** @param {unknown[]} values */
@@ -882,6 +979,7 @@ Usage:
   pm mail unlabel --label <labelId> <messageId...> [--json]
   pm mail trash <messageId...> [--json]
   pm mail delete <messageId...> [--yes] [--json]
+  pm update [--tag <tag>] [--prefix <path>] [--json]
   pm doctor config --json
   pm doctor session --json
 
@@ -914,6 +1012,13 @@ pm mail action flags:
   --dry-run              Report selected IDs without mutating mail
   --yes                  Confirm a real --from-search mutation
   --label <id>           Label ID for label/unlabel, or search filter for other actions
+
+pm update flags:
+  --tag <tag>            Install a specific GitHub Release tag; default latest
+  --version <version>    Alias for --tag; accepts X.Y.Z or vX.Y.Z
+  --prefix <path>        Installer prefix to update; default inferred from install
+  --repo <owner/name>    GitHub repository; default hacker-h/proton-mail-cli
+  --dry-run              Download and verify release assets without installing
 
 Aliases:
   pm ls                  Alias for pm mail list
@@ -999,6 +1104,7 @@ function normalizeCommand(positionals) {
   if (!first) return { command: "", args: [] };
   if (first === "help") return { command: "help", args: positionals.slice(1) };
   if (first === "version") return { command: "version", args: positionals.slice(1) };
+  if (first === "update" || first === "self-update") return { command: "update", args: positionals.slice(1) };
   if (["ls", "list", "inbox"].includes(first)) return { command: "mail:list", args: positionals.slice(1) };
   if (first === "read") return { command: "mail:read", args: positionals.slice(1) };
 
@@ -1168,6 +1274,14 @@ function renderDoctor(data) {
   const object = toRecord(data);
   const status = object.status || "unknown";
   return `${status}\n`;
+}
+
+/** @param {unknown} data */
+function renderUpdate(data) {
+  const object = toRecord(data);
+  const tag = object.tag || object.requestedTag || "latest";
+  if (object.status === "dry_run") return `Update dry run verified ${object.asset || "release asset"} for ${tag}.\n`;
+  return `Updated pm to ${tag} at ${object.pm || object.prefix || "configured prefix"}.\n`;
 }
 
 /**

@@ -57,6 +57,8 @@ describe("pm CLI runner", () => {
     assert.deepEqual(parseArgv(["read", "msg1"]).command, "mail:read");
     assert.deepEqual(parseArgv(["doctor", "config"]).command, "doctor:config");
     assert.deepEqual(parseArgv(["doctor", "auth"]).command, "doctor:session");
+    assert.deepEqual(parseArgv(["update"]).command, "update");
+    assert.deepEqual(parseArgv(["self-update"]).command, "update");
     assert.equal(parseArgv(["mail", "mark-read", "msg1"]).command, "mail:mark-read");
 
     const parsed = parseArgv([
@@ -654,6 +656,53 @@ describe("pm CLI runner", () => {
     assert.equal(exitCode, CLI_EXIT.OK);
     assert.equal(io.stdoutText(), "");
     assert.equal(io.stderrText(), "");
+  });
+
+  it("dispatches pm update with stable JSON output", async () => {
+    const io = createIo();
+    const update = mock.fn(async (options) => ({
+      success: true,
+      status: "dry_run",
+      repo: options.repo,
+      tag: "v2.2.1",
+      requestedTag: options.tag,
+      prefix: options.prefix,
+      asset: "proton-mail-cli-2.2.1.tgz",
+      pm: "/tmp/pm-prefix/bin/pm",
+      dryRun: options.dryRun,
+    }));
+
+    const exitCode = await runPmCli({
+      argv: ["update", "--tag", "2.2.1", "--prefix", "/tmp/pm-prefix", "--repo", "owner/repo", "--dry-run", "--json"],
+      clients: { update: { run: update } },
+      ...io,
+    });
+
+    assert.equal(exitCode, CLI_EXIT.OK);
+    const envelope = JSON.parse(io.stdoutText());
+    assert.equal(envelope.command, "update");
+    assert.equal(envelope.data.status, "dry_run");
+    assert.equal(envelope.data.repo, "owner/repo");
+    assert.equal(envelope.data.requestedTag, "2.2.1");
+    assert.equal(envelope.data.prefix, "/tmp/pm-prefix");
+    assert.equal(update.mock.calls[0].arguments[0].dryRun, true);
+    assert.equal(io.stderrText(), "");
+  });
+
+  it("returns stable update failures", async () => {
+    const io = createIo();
+    const update = mock.fn(async () => ({
+      success: false,
+      status: "unsupported_install_mode",
+      error: "source checkout",
+    }));
+
+    const exitCode = await runPmCli({ argv: ["update", "--json"], clients: { update: { run: update } }, ...io });
+
+    assert.equal(exitCode, CLI_EXIT.RUNTIME);
+    const envelope = JSON.parse(io.stderrText());
+    assert.equal(envelope.command, "update");
+    assert.equal(envelope.error.code, "UNSUPPORTED_INSTALL_MODE");
   });
 
   it("runs doctor config and session commands with stable JSON statuses", async () => {
