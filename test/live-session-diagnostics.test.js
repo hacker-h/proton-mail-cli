@@ -87,12 +87,15 @@ describe("live session diagnostics", () => {
       const authLog = path.join(directory, "auth.log");
       const driftLog = path.join(directory, "drift.log");
       const expiredLog = path.join(directory, "expired.log");
+      const falseChallengeLog = path.join(directory, "false-challenge.log");
       fs.writeFileSync(authLog, '{"category":"auth_challenge","twoFactor":true}\n');
       fs.writeFileSync(driftLog, '{"category":"project_or_proton_drift"}\n');
       fs.writeFileSync(expiredLog, '{"category":"project_or_proton_drift","sessionValid":false}\n');
+      fs.writeFileSync(falseChallengeLog, '{"category":"project_or_proton_drift","captcha":false,"twoFactor":false,"manualRequired":false}\n');
 
       assert.equal(resolveLiveSessionDiagnostic({ liveTestOutcome: "failure", liveTestLog: authLog }).category, "auth_challenge");
       assert.equal(resolveLiveSessionDiagnostic({ liveTestOutcome: "failure", liveTestLog: driftLog }).category, "selector_or_backend_drift");
+      assert.equal(resolveLiveSessionDiagnostic({ liveTestOutcome: "failure", liveTestLog: falseChallengeLog }).category, "selector_or_backend_drift");
       assert.equal(resolveLiveSessionDiagnostic({
         liveTestOutcome: "failure",
         allowFreshLogin: "0",

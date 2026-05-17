@@ -131,7 +131,9 @@ function flag(value) {
 function classifyLiveTestLog(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return "";
   const text = fs.readFileSync(filePath, "utf8");
-  if (/auth_challenge|captcha|twoFactor|manualRequired/u.test(text)) return "auth_challenge";
+  if (/"category"\s*:\s*"auth_challenge"/u.test(text)) return "auth_challenge";
+  if (/("captcha"|"twoFactor"|"manualRequired")\s*:\s*true/u.test(text)) return "auth_challenge";
+  if (/CAPTCHA detected|Two-factor authentication required|manual interaction required/iu.test(text)) return "auth_challenge";
   if (/sessionValid"?\s*:\s*false/u.test(text)) return "";
   if (/project_or_proton_drift|selector_or_backend_drift/u.test(text)) return "selector_or_backend_drift";
   return "";
