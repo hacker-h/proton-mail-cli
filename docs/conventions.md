@@ -116,7 +116,7 @@ Default no-match behavior should be a successful empty result when absence is ex
 
 `pm ls` / `pm mail list`, `pm mail search`, and `pm mail latest` follow the same search-like contract. Browser-backed list/search output may include preview snippets but must not include full message bodies, browser handles, or debug events. `pm read browser:index:N` is the explicit plaintext read path and may include `bodyText`.
 
-Mail action commands (`pm mail mark-read`, `mark-unread`, `label`, `unlabel`, `trash`, and `delete`) use REST message IDs only. Browser refs such as `browser:index:N` must be rejected before API calls. Selection-based actions must require `--from-search` plus `--dry-run` or `--yes`; no interactive prompt is required for automation-first use. JSON action output must include deterministic `action`, `dryRun`, `requested`, `affected`, `skipped`, and `failed` fields.
+Mail action commands (`pm mail mark-read`, `mark-unread`, `label`, `unlabel`, `trash`, `delete`, `archive`, `unarchive`, `restore`, `star`, `unstar`, `spam`, `not-spam`, and `move-to-folder`) use REST message IDs only. Browser refs such as `browser:index:N` must be rejected before API calls. Selection-based actions must require `--from-search` plus `--dry-run` or `--yes`; no interactive prompt is required for automation-first use. JSON action output must include deterministic `action`, `dryRun`, `requested`, `affected`, `skipped`, and `failed` fields. Folder moves must target a custom folder by `--folder-id <id>` or exact `--folder <name>` and must not silently treat browser folder names as destination folders for other actions.
 
 ## Config and Secrets
 

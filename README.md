@@ -128,7 +128,17 @@ pm mail label --label 10 MESSAGE_ID --json
 pm mail unlabel --label 10 MESSAGE_ID --json
 pm mail trash MESSAGE_ID --json
 pm mail delete MESSAGE_ID --yes --json
+pm mail archive MESSAGE_ID --json
+pm mail unarchive MESSAGE_ID --json
+pm mail restore MESSAGE_ID --json
+pm mail star MESSAGE_ID --json
+pm mail unstar MESSAGE_ID --json
+pm mail spam MESSAGE_ID --json
+pm mail not-spam MESSAGE_ID --json
+pm mail move-to-folder --folder-id FOLDER_ID MESSAGE_ID --json
 ```
+
+`archive`, `unarchive`, `restore`, `spam`, `not-spam`, and `move-to-folder` move messages by applying the destination Proton system folder or custom folder label. `star`/`unstar` toggle the Proton starred label without moving the message. `move-to-folder` accepts `--folder-id <id>` or an exact custom folder name through `--folder <name>`; folder IDs come from Proton labels with type `FOLDER`.
 
 Selection-based actions are gated. Use `--from-search` with REST metadata filters and either `--dry-run` or `--yes`:
 
@@ -287,6 +297,11 @@ const unreadInvoices = await client.getMessageMetadata(buildMailMetadataFilter({
 }));
 const message = await client.getMessage("MESSAGE_ID");
 await client.markMessagesRead(["MESSAGE_ID"]);
+await client.archiveMessages(["MESSAGE_ID"]);
+await client.unarchiveMessages(["MESSAGE_ID"]);
+await client.starMessages(["MESSAGE_ID"]);
+await client.unstarMessages(["MESSAGE_ID"]);
+await client.moveMessagesToFolder(["MESSAGE_ID"], "FOLDER_ID");
 const attachmentBytes = await client.getAttachment("ATTACHMENT_ID");
 const labels = await client.getLabels();
 const newLabel = await client.createLabel("Important", "#ff0000");
@@ -325,12 +340,12 @@ Update this table whenever support or live coverage changes.
 | Mail list, search, latest, and read | Yes: `pm ls`, `pm mail search`, `pm mail latest`, `pm read browser:index:N` | Yes: browser inbox/latest methods | Yes | #80 | Browser-backed reads include only previews except `pm read`, which intentionally returns body text. |
 | Two-account UI send/receive | No public send command | No public send API; live test uses Proton browser UI | Yes | #83 | Covers real To, Cc, and Bcc delivery between the two test accounts. Does not imply REST send support. |
 | REST message metadata filters | Yes for `pm ls` metadata filters when `PROTONMAIL_REST_SESSION_FILE` is configured | Yes: `getMessageMetadata`, metadata filter builder | Yes | #78 | Live smoke covers metadata reads against a real REST session. |
-| REST mail actions | Yes: mark read/unread, label/unlabel, trash/delete by stable message ID | Yes: message mutation methods | Partial | #78 | Default live CI avoids destructive actions; opt-in reversible mutation checks use test-prefixed labels. |
+| REST mail actions | Yes: mark read/unread, label/unlabel, trash/delete, archive/unarchive/restore, star/unstar, spam/not-spam, and move-to-folder by stable message ID | Yes: message mutation methods | Partial | #78, #82 | Default live CI avoids destructive actions; opt-in reversible mutation checks use test-prefixed labels/messages. |
 | Auth/user REST endpoints | No dedicated CLI command | Yes: user/address/key-salt methods | No | #79 | Covered offline by client contract tests; live expansion can be tracked from the feature parity issue. |
 | Attachments download | No dedicated CLI command | Partial: raw attachment bytes through `getAttachment` | No | #88 | Attachment decryption and send are not implemented. |
 | Labels and folders CRUD | No dedicated CLI command | Partial: labels list/create/update/delete | No | #85 | Needs safe live CRUD coverage before claiming upstream behavior. |
 | Conversations and events | No dedicated CLI command | Yes: conversation and event methods | No | #86 | REST client support exists; live smoke tests are still pending. |
-| Move, archive, star, and spam | No dedicated CLI command | Partial through lower-level label/action methods | No | #82 | Needs stable command UX and live tests. |
+| Move, archive, star, and spam | Yes: `pm mail archive`, `unarchive`, `restore`, `star`, `unstar`, `spam`, `not-spam`, `move-to-folder` | Yes: first-class helper methods over Proton labels | Yes | #82 | Live coverage uses generated two-account test messages and cleans up prefixed folders/messages. |
 | Installed binary live regression | Package smoke only in offline CI | N/A | No | #91, #76 | Existing live checks run from the workspace; installed-tarball live regression is pending. |
 | Release installer, update, and checksums | Installer and `pm update` supported | N/A | No | #74, #75, #73 | Installer/update flows download GitHub Release tarballs, verify `SHA256SUMS`, and run `pm --help` after installation. |
 | Scheduled session refresh | Workflow support exists | Yes through browser session refresh | Partial | #77 | Live workflow refreshes trusted cached/seeded sessions; issue remains for stronger actionability. |
@@ -352,7 +367,7 @@ Update this table whenever support or live coverage changes.
 | Browser automation | `ProtonMailBrowserClient.loginAndSaveSession`, `getInboxMessages`, `getLatestMessage` |
 | Auth/User | `getUser`, `getAddresses`, `getKeySalts` |
 | Messages (read) | `getMessage`, `getMessageMetadata`, `getAllMessageMetadata`, `getMessageIds`, `getAllMessageIds`, `getMessageCount` |
-| Messages (actions) | `deleteMessages`, `markMessagesRead`, `markMessagesUnread`, `labelMessages`, `unlabelMessages`, `markMessagesForwarded`, `markMessagesUnforwarded` |
+| Messages (actions) | `deleteMessages`, `markMessagesRead`, `markMessagesUnread`, `labelMessages`, `unlabelMessages`, `archiveMessages`, `unarchiveMessages`, `restoreMessages`, `starMessages`, `unstarMessages`, `markMessagesSpam`, `markMessagesNotSpam`, `moveMessagesToFolder`, `markMessagesForwarded`, `markMessagesUnforwarded` |
 | Attachments | `getAttachment` |
 | Labels/Folders | `getLabels`, `createLabel`, `updateLabel`, `deleteLabel` |
 | Conversations | `getConversation`, `getConversations` |
